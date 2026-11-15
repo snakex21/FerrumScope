@@ -453,7 +453,7 @@ fn factSource(t: hwdb.SourceType) model.FieldSource {
 
 /// Nakłada fakty z bazy: `stepping_name`, `socket_name`, `package_contacts`.
 ///
-/// Każde pole ma **własny** zakres: `VMR-B2` dotyczy konkretnego stepppingu, a
+/// Każde pole ma **własny** zakres: `Vermeer-B2` dotyczy konkretnego stepppingu, a
 /// `AM4` — całego modelu. Stąd osobne lookupy w `Hwdb` zamiast jednego
 /// „pierwszego dopasowania”, które ukryłoby gniazdo za węższym wpisem.
 ///

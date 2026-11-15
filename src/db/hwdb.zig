@@ -345,7 +345,7 @@ pub const Fact = struct {
     /// Liczba kontaktów/-pinów. 0 = nieznana. Nigdy nie zgadujemy.
     package_contacts: u16 = 0,
     _reserved: u8 = 0,
-    /// Nazwa kodowa stepppingu, np. `VMR-B2`. Interpretacja, nie pomiar.
+    /// Nazwa kodowa stepppingu, np. `Vermeer-B2`. Interpretacja, nie pomiar.
     stepping_name: Str = .{},
     /// Nazwa gniazda/pakietu, np. `AM4`. Osobne od `Socket Designation` z SMBIOS.
     socket_name: Str = .{},
@@ -645,7 +645,7 @@ pub const Hwdb = struct {
         };
     }
 
-    /// Które pole faktu szukamy. Osobne pola mają **różny zakres**: `VMR-B2`
+    /// Które pole faktu szukamy. Osobne pola mają **różny zakres**: `Vermeer-B2`
     /// dotyczy konkretnego stepppingu, `AM4` — całego modelu.
     const FactField = enum { stepping_name, socket_name, package_contacts };
 
@@ -653,7 +653,7 @@ pub const Hwdb = struct {
     ///
     /// Osobne lookupi zamiast jednego „pierwszego dopasowania”, bo `Fact` dla
     /// Vermeer to dwa rekordy o różnych zakresach: jeden wąski (stepping 2 →
-    /// `VMR-B2`), drugi szeroki (cały model → `AM4`). Pojedyncze `factFor`
+    /// `Vermeer-B2`), drugi szeroki (cały model → `AM4`). Pojedyncze `factFor`
     /// zwróciłoby wąski i **ukryłoby gniazdo** dla 5800X3D.
     fn firstFactWith(self: Hwdb, v: VendorId, sig: ids.Signature, field: FactField) ?Fact {
         var i: usize = 0;

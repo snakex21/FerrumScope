@@ -353,7 +353,7 @@ pub const CpuInfo = struct {
     // zostać wyprowadzone z samego CPUID inaczej niż przez bazę z jawnego
     // provenance, bo CPUID tych informacji nie zawiera.
 
-    /// Nazwa kodowa stepppingu, np. `VMR-B2`.
+    /// Nazwa kodowa stepppingu, np. `Vermeer-B2`.
     ///
     /// Osobne od `stepping`, który jest **surowym odczytem CPUID** i ma zostać
     /// taki. `stepping_name` to interpretacja: ten sam stepping w różnych rodzinach

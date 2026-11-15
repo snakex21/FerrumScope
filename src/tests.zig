@@ -955,7 +955,8 @@ fn decodeSynth(vendor: ids.CpuVendor, eax: u32, brand_text: []const u8) !model.C
 
 test "hwdb v3: sekcje Fact i BrandRule są osadzone i policzone" {
     const db = try embedded.load();
-    try std.testing.expectEqual(@as(usize, 2), db.factCount());
+    // Milan-B1, Milan-B2, Vermeer-B2, AM4 (db/source/cpu/amd.toml).
+    try std.testing.expectEqual(@as(usize, 4), db.factCount());
     try std.testing.expectEqual(@as(usize, 1), db.brandRuleCount());
     // Granice sekcji muszą mieścić się w pliku — inaczej czytnik czytałby bajty
     // spoza końca pliku (albo, co gorsza, z innej sekcji).
@@ -972,7 +973,7 @@ test "hwdb v3: nazwa stepppingu i gniazdo czytają się dla zmierzonej sygnatury
 
     const f = db.steppingNameFact(hwdb_mod.VendorId.amd, sig);
     try std.testing.expect(f != null);
-    try std.testing.expectEqualStrings("VMR-B2", db.text(f.?.stepping_name));
+    try std.testing.expectEqualStrings("Vermeer-B2", db.text(f.?.stepping_name));
 
     const s = db.socketFact(hwdb_mod.VendorId.amd, sig);
     try std.testing.expect(s != null);
@@ -987,7 +988,7 @@ test "hwdb v3: fakty innego vendora nie trafiają do AMD" {
 }
 
 test "hwdb v3: zakres stepppingu jest respektowany" {
-    // stepping 0 to nie stepping 2 — nazwa `VMR-B2` go nie opisuje.
+    // stepping 0 to nie stepping 2 — nazwa `Vermeer-B2` go nie opisuje.
     const db = try embedded.load();
     const sig0 = ids.Signature.fromEax(0x00A20F10);
     try std.testing.expect(db.steppingNameFact(.amd, sig0) == null);
@@ -998,7 +999,7 @@ test "identyfikacja 5800X3D: stepping_name, socket i wariant z brandu" {
 
     // Surowy stepping to odczyt CPUID i nie wolno mu stać się nazwą.
     try std.testing.expectEqual(@as(u8, 2), info.stepping);
-    try std.testing.expectEqualStrings("VMR-B2", info.stepping_name orelse "BRAK");
+    try std.testing.expectEqualStrings("Vermeer-B2", info.stepping_name orelse "BRAK");
     try std.testing.expectEqualStrings("AM4", info.socket_name orelse "BRAK");
     try std.testing.expectEqualStrings("3D V-Cache", info.variant orelse "BRAK");
     try std.testing.expectEqualStrings("Ryzen 7 5800X3D", info.product_name orelse "BRAK");
@@ -1067,9 +1068,10 @@ test "§0: szeroki HWDB nadal zwraca zawężony zakres, a refined pozostaje pust
     const info = try decodeSynth(.amd, AMD_ZEN3_DESKTOP, "AMD Ryzen 7 5800X3D 8-Core Processor");
     try std.testing.expect(info.codename_refined == null);
     try std.testing.expect(info.codename_refined_source == .none);
-    // Szeroki wpis nadal opisuje cały zakres 0x20..0x3F.
-    try std.testing.expect(std.mem.indexOf(u8, info.codename orelse "", "Vermeer") != null);
-    try std.testing.expect(std.mem.indexOf(u8, info.codename orelse "", "Milan-X") != null);
+    // Zakres 0x20..0x2F to wyłącznie Vermeer; Milan-X leży w 0x00..0x0F
+    // (AMD Revision Guide 56683), więc nazwa nie może go już wymieniać.
+    try std.testing.expectEqualStrings("Vermeer", info.codename orelse "");
+    try std.testing.expect(std.mem.indexOf(u8, info.codename orelse "", "Milan") == null);
 }
 
 test "§0: zawężony codename nie może nadpisać szerokiego" {
@@ -1089,7 +1091,7 @@ test "identyfikacja 5800X: ta sama sygnatura, brak wariantu 3D V-Cache" {
     // ten test dowodzi, że wariant pochodzi z brandu, a nie z dopasowania.
     const info = try decodeSynth(.amd, AMD_ZEN3_DESKTOP, "AMD Ryzen 7 5800X 8-Core Processor");
     try std.testing.expect(info.variant == null);
-    try std.testing.expectEqualStrings("VMR-B2", info.stepping_name.?);
+    try std.testing.expectEqualStrings("Vermeer-B2", info.stepping_name.?);
     try std.testing.expectEqualStrings("AM4", info.socket_name.?);
 }
 
@@ -1132,11 +1134,13 @@ test "identyfikacja: brand nie nadpisuje twardych danych CPUID" {
 test "source tracking: surowy stepping to hardware, stepping_name to interpretacja" {
     const info = try decodeSynth(.amd, AMD_ZEN3_DESKTOP, "AMD Ryzen 7 5800X3D 8-Core Processor");
 
-    // Nazwa stepppingu to obserwacja referencyjna (CPU-Z jako oracle), a nie
-    // dokumentacja AMD — i to musi być widoczne w polu źródłowym.
-    try std.testing.expectEqual(model.FieldSource.empirical, info.stepping_name_source);
+    // Nazwa stepppingu jest wyprowadzona z konwencji AMD dla sąsiedniego
+    // zakresu modeli (Revision Guide 56683) — nie z CPU-Z — i to musi być
+    // widoczne w polu źródłowym: typ dowodu `vendor_doc_adjacent`, nie `vendor_doc`.
+    try std.testing.expect(info.stepping_name_source != model.FieldSource.empirical);
+    try std.testing.expect(info.stepping_name_source.isDerived());
     try std.testing.expectEqual(
-        model.ProvenanceType.reference_observation,
+        model.ProvenanceType.vendor_doc_adjacent,
         info.stepping_name_provenance.source_type,
     );
     try std.testing.expectEqual(model.Confidence.medium, info.stepping_name_provenance.confidence);
@@ -1172,4 +1176,52 @@ test "package_contacts zostaje nieznane bez potwierdzonego źródła" {
     // Wolno zostawić `unknown`, niedozwolone jest przepisywać obserwację
     // narzędzia referencyjnego jako daną producenta.
     try std.testing.expectEqual(@as(u16, 0), info.package_contacts);
+}
+
+// ---------------------------------------------------------------------------
+// Przegląd zakresów AMD (2026-11-15): Revision Guides AMD, Linux amd.c, InstLatx64
+// ---------------------------------------------------------------------------
+
+fn amdHit(eax: u32) ?struct { uarch: []const u8, codename: []const u8 } {
+    const db = embedded.load() catch return null;
+    const m = db.matchCpu(.amd, ids.Signature.fromEax(eax)) orelse return null;
+    return .{ .uarch = db.text(m.entry.uarch), .codename = db.text(m.entry.codename) };
+}
+
+test "hwdb AMD: zakresy modeli wg dokumentacji i publicznych zrzutów CPUID" {
+    const cases = [_]struct { eax: u32, uarch: []const u8, codename_has: []const u8 }{
+        .{ .eax = 0x00A00F12, .uarch = "Zen 3", .codename_has = "Milan-X" }, // AMD RG 56683
+        .{ .eax = 0x00A20F12, .uarch = "Zen 3", .codename_has = "Vermeer" },
+        .{ .eax = 0x00A50F00, .uarch = "Zen 3", .codename_has = "Cezanne" },
+        .{ .eax = 0x00A40F41, .uarch = "Zen 3+", .codename_has = "Rembrandt" },
+        .{ .eax = 0x00A60F12, .uarch = "Zen 4", .codename_has = "Raphael" },
+        .{ .eax = 0x00A70F41, .uarch = "Zen 4", .codename_has = "Phoenix" },
+        .{ .eax = 0x00870F10, .uarch = "Zen 2", .codename_has = "Matisse" },
+        .{ .eax = 0x00860F01, .uarch = "Zen 2", .codename_has = "Renoir" },
+        .{ .eax = 0x00800F82, .uarch = "Zen / Zen+", .codename_has = "Pinnacle Ridge" },
+        .{ .eax = 0x00B00F21, .uarch = "Zen 5", .codename_has = "Turin" }, // AMD RG 58251
+        .{ .eax = 0x00B40F40, .uarch = "Zen 5", .codename_has = "Granite Ridge" },
+        .{ .eax = 0x00600F20, .uarch = "Bulldozer / Piledriver", .codename_has = "Vishera" },
+    };
+    for (cases) |c| {
+        const h = amdHit(c.eax) orelse {
+            std.debug.print("brak trafienia dla 0x{X:0>8}\n", .{c.eax});
+            return error.TestUnexpectedResult;
+        };
+        try std.testing.expectEqualStrings(c.uarch, h.uarch);
+        if (std.mem.indexOf(u8, h.codename, c.codename_has) == null) {
+            std.debug.print("0x{X:0>8}: '{s}' nie zawiera '{s}'\n", .{ c.eax, h.codename, c.codename_has });
+            return error.TestUnexpectedResult;
+        }
+    }
+    // Vermeer nie wymienia już Milan-X (to inny zakres modeli).
+    try std.testing.expect(std.mem.indexOf(u8, amdHit(0x00A20F10).?.codename, "Milan") == null);
+    // Model bez publicznego produktu nie dostaje cudzej nazwy.
+    try std.testing.expect(amdHit(0x00A30F00) == null);
+}
+
+test "hwdb AMD: rewizje Milan wprost z AMD Revision Guide 56683" {
+    const db = try embedded.load();
+    const f = db.steppingNameFact(.amd, ids.Signature.fromEax(0x00A00F12)).?;
+    try std.testing.expectEqualStrings("Milan-B2", db.text(f.stepping_name));
 }
