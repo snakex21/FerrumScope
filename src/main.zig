@@ -96,6 +96,10 @@ const Usage = "ferrumscope " ++ version ++ " - identyfikacja i diagnostyka sprz�
     \\      --cpu-replay <f.cpuimg>     CPU z pliku capture
     \\  ferrumscope capture-sys <plik.sysimg> [--include-serials]
     \\                                  zapisz surowe SMBIOS/PCI/GPU/dyski (seriale maskowane)
+    \\  ferrumscope update --check      sprawdź aktualizację (kod 0 aktualna, 10 dostępna, 1 błąd)
+    \\  ferrumscope update --apply [--yes]  pobierz, zweryfikuj (SHA-256) i zainstaluj
+    \\  ferrumscope update --rollback   przywróć poprzednią wersję (*.old)
+    \\  ferrumscope update --set-auto on|off  sprawdzanie aktualizacji przy starcie GUI
     \\  ferrumscope version             wersja
     \\
 ;
@@ -189,6 +193,7 @@ pub fn main() !u8 {
     if (std.mem.eql(u8, cmd, "storage")) return cmdReport(alloc, argv[2..], "storage");
     if (std.mem.eql(u8, cmd, "sensors-all")) return cmdReport(alloc, argv[2..], "sensors");
     if (std.mem.eql(u8, cmd, "capture-sys")) return cmdCaptureSys(alloc, argv[2..]);
+    if (std.mem.eql(u8, cmd, "update")) return @import("update/update.zig").cli.run(alloc, argv[2..], out(), errw());
 
     try errw().print("ferrumscope: nieznane polecenie '{s}'\n\n", .{cmd});
     try errw().writeAll(Usage);

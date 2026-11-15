@@ -17,16 +17,15 @@
 const std = @import("std");
 
 pub const locales = [_][]const u8{
-    "pl", "en", "bg", "cs", "da", "de", "el", "es", "et", "fi", "fr", "hr", "hu", "it",
+    "pl", "en", "bg", "cs", "da",    "de", "el", "es", "et", "fi",      "fr", "hr", "hu", "it",
     "lt", "lv", "nb", "nl", "pt-BR", "ro", "ru", "sk", "sl", "sr-Latn", "sv", "tr", "uk",
 };
 
 /// Nazwy języków w nich samych (do wyboru w GUI).
 pub const native_names = [_][]const u8{
-    "Polski",     "English", "Български", "Čeština", "Dansk",    "Deutsch",   "Ελληνικά", "Español", "Eesti",
-    "Suomi",      "Français", "Hrvatski", "Magyar",  "Italiano", "Lietuvių", "Latviešu", "Norsk bokmål",
-    "Nederlands", "Português (Brasil)", "Română", "Русский", "Slovenčina", "Slovenščina", "Srpski", "Svenska",
-    "Türkçe",     "Українська",
+    "Polski",              "English",   "Български", "Čeština",   "Dansk",         "Deutsch",   "Ελληνικά", "Español",      "Eesti",
+    "Suomi",               "Français", "Hrvatski",           "Magyar",      "Italiano",      "Lietuvių", "Latviešu",        "Norsk bokmål", "Nederlands",
+    "Português (Brasil)", "Română",  "Русский",     "Slovenčina", "Slovenščina", "Srpski",    "Svenska",          "Türkçe",      "Українська",
 };
 
 pub const Plural = enum { zero, one, two, few, many, other };

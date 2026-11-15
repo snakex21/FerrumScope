@@ -24,6 +24,9 @@ pub const arch = struct {
 
 pub const bus = struct {};
 
+/// Ustawienia programu przenośnego (`data\settings.ini` obok programu).
+pub const settings = @import("settings.zig");
+
 pub const telemetry = struct {
     pub const msr = @import("telemetry/msr.zig");
     pub const delta = @import("telemetry/delta.zig");

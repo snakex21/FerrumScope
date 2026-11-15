@@ -1,0 +1,120 @@
+# Wydanie FerrumScope (Windows x64, wersja przenośna) + manifest aktualizatora.
+#
+# Uruchamia się po wypchnięciu tagu `v*` albo ręcznie (workflow_dispatch) dla
+# istniejącego tagu. Kroki:
+#   1. przypięty Zig 0.15.2 z weryfikacją SHA-256 (tools/fetch_zig.py);
+#   2. zgodność tagu z `version` w src/present.zig, testy, zig fmt;
+#   3. build ReleaseSafe;
+#   4. FerrumScope-<wersja>-windows-x64.zip (bez .pdb), ferrumscope-update.json
+#      i SHA256SUMS (tools/make_release.py);
+#   5. wydanie GitHub przez `gh` (bez akcji zewnętrznych). Wersja z myślnikiem
+#      (np. 0.3.0-preview.1) = pre-release; aktualizator czyta
+#      `releases/latest`, więc pre-release nie jest proponowany automatycznie.
+#
+# Bez akcji z Marketplace: kod pobieramy `git fetch`, a wydanie tworzy `gh`
+# (preinstalowany na windows-latest) — nie ma czego przypinać po SHA.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Istniejący tag wydania, np. v0.2.0'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
+      # Wartość z wejścia przechodzi wyłącznie przez zmienną środowiskową
+      # i jest walidowana wyrażeniem regularnym (bez wstrzykiwania do skryptu).
+      INPUT_TAG: ${{ inputs.tag }}
+      ZIG: tools/zig/zig-x86_64-windows-0.15.2/zig.exe
+    steps:
+      - name: Ustal tag i wersję
+        id: ver
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then TAG="$INPUT_TAG"; else TAG="$GITHUB_REF_NAME"; fi
+          if ! printf '%s' "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "::error::Niepoprawny tag '$TAG' (oczekiwano vX.Y.Z albo vX.Y.Z-pre)"; exit 1
+          fi
+          VERSION="${TAG#v}"
+          case "$VERSION" in *-*) PRE=true ;; *) PRE=false ;; esac
+          { echo "tag=$TAG"; echo "version=$VERSION"; echo "prerelease=$PRE"; } >> "$GITHUB_OUTPUT"
+
+      - name: Pobierz kod (tag)
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          git init -q .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git -c protocol.version=2 fetch -q --no-tags --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+          git checkout -q --detach "refs/tags/$TAG"
+          git log -1 --format='%H %s'
+
+      - name: Przypięty Zig 0.15.2 (SHA-256)
+        run: |
+          python tools/fetch_zig.py
+          "$ZIG" version
+
+      - name: Zgodność wersji z src/present.zig
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: python tools/make_release.py --check-version "$VERSION"
+
+      - name: Testy i formatowanie
+        run: |
+          "$ZIG" build test --summary all
+          "$ZIG" fmt --check src tools build.zig
+
+      - name: Build ReleaseSafe
+        run: |
+          "$ZIG" build -Doptimize=ReleaseSafe
+          ls -la zig-out/bin
+
+      - name: Artefakty wydania
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          python tools/make_release.py --version "$VERSION" --bin zig-out/bin --out dist --notes-out release-notes.md
+          (cd dist && sha256sum --check SHA256SUMS)
+          ls -la dist
+
+      - name: Wydanie GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          PRERELEASE: ${{ steps.ver.outputs.prerelease }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Wydanie $TAG już istnieje — nie nadpisuję."; exit 1
+          fi
+          if [ "$PRERELEASE" = "true" ]; then FLAGS="--prerelease --latest=false"; else FLAGS="--latest"; fi
+          # shellcheck disable=SC2086
+          gh release create "$TAG" \
+            "dist/FerrumScope-$VERSION-windows-x64.zip" \
+            dist/ferrumscope-update.json \
+            dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "FerrumScope $VERSION" \
+            --notes-file release-notes.md \
+            $FLAGS

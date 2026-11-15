@@ -27,6 +27,7 @@ const present = @import("present.zig");
 const app_mod = @import("app.zig");
 const ferrum = @import("root.zig");
 const pci_embedded = @import("db/pci_embedded.zig");
+const update = @import("update/update.zig");
 
 const report = ferrum.sys.report;
 
@@ -424,6 +425,20 @@ fn createSpecialTabs() void {
     extra(ix_about, createChild(L("STATIC"), L("Najedź na wartość, aby zobaczyć źródło, pewność i surowe dane.\n" ++
         "„Pokaż źródła” dodaje znacznik: W wysoka · Ś średnia · N niska pewność · ~ oszacowanie · " ++
         "Z zaślepka firmware · A wymaga administratora · S wymaga sterownika · – niedostępne."), 0, st, 0));
+    // --- Aktualizacje (logika w update/gui.zig, teksty w update/text.zig) -----
+    const ut = update.text.t;
+    var ub: [512]u16 = undefined;
+    extra(ix_about, createChild(L("BUTTON"), widen(&ub, ut.gui_group), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
+    const upd_btn = createChild(L("BUTTON"), widen(&ub, ut.gui_check_button), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, update.gui.ID_CHECK);
+    const upd_auto = createChild(L("BUTTON"), widen(&ub, ut.gui_auto_checkbox), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_AUTOCHECKBOX, update.gui.ID_AUTO);
+    extra(ix_about, upd_btn);
+    extra(ix_about, upd_auto);
+    const upd_channel = createChild(L("BUTTON"), widen(&ub, ut.gui_channel_checkbox), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_AUTOCHECKBOX, update.gui.ID_CHANNEL);
+    extra(ix_about, upd_channel);
+    const upd_info = createChild(L("STATIC"), null, 0, st, 0);
+    setText(upd_info, ut.gui_info);
+    extra(ix_about, upd_info);
+    update.gui.initControls(upd_btn, upd_auto, upd_channel);
 }
 
 // ---------------------------------------------------------------------------
@@ -541,8 +556,11 @@ fn layoutSpecial(t: usize, area: w.RECT) void {
             y += px(M.head) + px(2);
             bx = x + px(M.pad);
         } else if (is_button) {
-            move(hh, bx, y, px(120), px(26));
-            bx += px(126);
+            // Pole wyboru i dłuższe przyciski (aktualizacje) potrzebują więcej miejsca.
+            const style: u32 = @bitCast(GetWindowLongW(hh, -16));
+            const bw: i32 = if ((style & 0xF) == w.BS_AUTOCHECKBOX) px(210) else if (GetWindowLongW(hh, -12) == update.gui.ID_CHECK) px(160) else px(120);
+            move(hh, bx, y, bw, px(26));
+            bx += bw + px(6);
         } else {
             if (bx != x + px(M.pad)) y += px(32);
             move(hh, x + px(M.pad), y, width - 2 * px(M.pad), px(80));
@@ -1014,6 +1032,9 @@ fn wndProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.win
                     layout();
                 },
                 ID_LISTVIEW => setListMode(checked(app.chk_list)),
+                update.gui.ID_CHECK => update.gui.onCheckClicked(hwnd),
+                update.gui.ID_AUTO => update.gui.onAutoToggled(@ptrFromInt(@as(usize, @bitCast(lparam)))),
+                update.gui.ID_CHANNEL => update.gui.onChannelToggled(@ptrFromInt(@as(usize, @bitCast(lparam)))),
                 else => if (id >= ID_PINBTN0 and id < ID_PINBTN0 + max_cells) {
                     pinFromClipboard(&app.cells[id - ID_PINBTN0]);
                 } else if (id >= ID_CELLBTN0 and id < ID_CELLBTN0 + max_cells) {
@@ -1051,6 +1072,10 @@ fn wndProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.win
             }
             _ = w.SetBkColor(hdc, w.GetSysColor(w.COLOR_WINDOW));
             return @bitCast(@intFromPtr(w.GetSysColorBrush(w.COLOR_WINDOW)));
+        },
+        update.gui.WM_UPDATE => {
+            update.gui.onMessage(hwnd, lparam);
+            return 0;
         },
         w.WM_GETMINMAXINFO => {
             const mmi: *w.MINMAXINFO = @ptrFromInt(@as(usize, @bitCast(lparam)));
@@ -1191,6 +1216,8 @@ pub fn wWinMain(inst: w.HINSTANCE, _: ?w.HINSTANCE, cmd_ptr: [*:0]u16, show_cmd:
     _ = w.SetTimer(hwnd, timer_id, refresh_ms, null);
     _ = w.ShowWindow(hwnd, show_cmd);
     _ = w.UpdateWindow(hwnd);
+    // `--post-update=<pid>` po aktualizacji albo ciche sprawdzenie (raz na dobę, w tle).
+    update.gui.onStart(hwnd, cmd);
 
     var msg: w.MSG = undefined;
     while (w.GetMessageW(&msg, null, 0, 0) > 0) {
