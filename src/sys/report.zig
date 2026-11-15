@@ -81,6 +81,32 @@ pub const Section = struct {
     fields: std.ArrayList(Field) = .empty,
 };
 
+/// Gniazdo pamięci do mapy gniazd (strona „memory”): GUI rysuje z tego
+/// kafelki, eksport JSON zapisuje tablicę `slots` (stałe angielskie klucze).
+pub const MemSlot = struct {
+    /// Numer 1..N w kolejności struktur SMBIOS typ 17 (= kolejność sekcji
+    /// „Gniazdo {slot}” i listy wyboru w GUI).
+    index: u16,
+    locator: []const u8 = "",
+    bank: []const u8 = "",
+    /// Krótka etykieta („A1”) albo lokator, gdy kanału nie da się ustalić.
+    label: []const u8 = "",
+    /// Kanał (np. „A”, „P1-A”); pusty = nieznany.
+    channel: []const u8 = "",
+    channel_confidence: Confidence = .unknown,
+    occupied: bool = false,
+    size_bytes: ?u64 = null,
+    /// Typ pamięci (np. „DDR4”); pusty = brak.
+    mem_type: []const u8 = "",
+    /// Producent z SMBIOS (bez zaślepek); pusty = brak.
+    manufacturer: []const u8 = "",
+    /// Rozpoznany producent (nazwa wyświetlana) — z pola producenta albo
+    /// z numeru części; pusty = nierozpoznany.
+    vendor: []const u8 = "",
+    /// Klucz producenta (`gui/vendors.zig`, np. `gskill`) — do logo w GUI.
+    vendor_key: []const u8 = "",
+};
+
 pub const Page = struct {
     id: []const u8,
     title: []const u8,
@@ -90,6 +116,8 @@ pub const Page = struct {
     summary: []const u8 = "",
     sections: std.ArrayList(Section) = .empty,
     links: std.ArrayList(Link) = .empty,
+    /// Tylko strona „memory”: mapa gniazd (pusta na innych stronach).
+    slots: []const MemSlot = &.{},
 
     pub fn fieldCount(self: *const Page) usize {
         var n: usize = 0;
@@ -315,9 +343,36 @@ pub fn writeJson(w: *std.Io.Writer, r: Report, opts: ExportOptions) !void {
             try writeJsonString(w, l.url);
             try w.writeByte('}');
         }
-        try w.writeAll("]}");
+        try w.writeByte(']');
+        if (p.slots.len > 0) try writeJsonSlots(w, p.slots);
+        try w.writeByte('}');
     }
     try w.writeAll("\n  ]\n}\n");
+}
+
+fn writeJsonSlots(w: *std.Io.Writer, slots: []const MemSlot) !void {
+    try w.writeAll(",\n     \"slots\": [");
+    for (slots, 0..) |sl, i| {
+        if (i > 0) try w.writeByte(',');
+        try w.print("\n        {{\"index\": {d}, \"locator\": ", .{sl.index});
+        try writeJsonString(w, sl.locator);
+        try w.writeAll(", \"bank\": ");
+        try writeJsonString(w, sl.bank);
+        try w.writeAll(", \"label\": ");
+        try writeJsonString(w, sl.label);
+        try w.writeAll(", \"channel\": ");
+        if (sl.channel.len > 0) try writeJsonString(w, sl.channel) else try w.writeAll("null");
+        try w.print(", \"channel_confidence\": \"{s}\", \"occupied\": {}, \"size_bytes\": ", .{ sl.channel_confidence.toSlice(), sl.occupied });
+        if (sl.size_bytes) |n| try w.print("{d}", .{n}) else try w.writeAll("null");
+        try w.writeAll(", \"type\": ");
+        if (sl.mem_type.len > 0) try writeJsonString(w, sl.mem_type) else try w.writeAll("null");
+        try w.writeAll(", \"manufacturer\": ");
+        if (sl.manufacturer.len > 0) try writeJsonString(w, sl.manufacturer) else try w.writeAll("null");
+        try w.writeAll(", \"vendor\": ");
+        if (sl.vendor.len > 0) try writeJsonString(w, sl.vendor) else try w.writeAll("null");
+        try w.writeByte('}');
+    }
+    try w.writeByte(']');
 }
 
 // ---------------------------------------------------------------------------

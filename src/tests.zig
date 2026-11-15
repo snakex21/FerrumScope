@@ -1280,6 +1280,53 @@ test "sysimg replay: pamięć z SMBIOS typ 17" {
     try std.testing.expectEqualStrings("F4-4000C18-16GTZR", fieldValue(mem, "Gniazdo DIMM 1", "Part number").?);
 }
 
+test "sysimg replay: mapa gniazd — 2 z 4 (DIMM 1 i DIMM 3), banki P0 CHANNEL A/B" {
+    const st = try replayState();
+    defer st.destroy();
+    const pages = st.buildPages();
+    const mem = findPage(pages, "memory");
+    try std.testing.expectEqual(@as(usize, 4), mem.slots.len);
+    const want_label = [_][]const u8{ "A1", "A2", "B1", "B2" };
+    const want_bank = [_][]const u8{ "P0 CHANNEL A", "P0 CHANNEL A", "P0 CHANNEL B", "P0 CHANNEL B" };
+    for (mem.slots, 0..) |sl, i| {
+        try std.testing.expectEqual(@as(u16, @intCast(i + 1)), sl.index);
+        try std.testing.expectEqualStrings(want_label[i], sl.label);
+        try std.testing.expectEqualStrings(want_bank[i], sl.bank);
+        // Obsadzone: #2 (DIMM 1, kanał A) i #4 (DIMM 1, kanał B) — w numeracji 0..3 to DIMM 1 i DIMM 3.
+        try std.testing.expectEqual(i == 1 or i == 3, sl.occupied);
+    }
+    try std.testing.expectEqualStrings("DIMM 1", mem.slots[1].locator);
+    try std.testing.expectEqual(@as(?u64, 16 * 1024 * 1024 * 1024), mem.slots[1].size_bytes);
+    try std.testing.expectEqualStrings("DDR4", mem.slots[1].mem_type);
+    // Producent „Unknown” (zaślepka) → rozpoznany z numeru części F4-….
+    try std.testing.expectEqualStrings("gskill", mem.slots[1].vendor_key);
+    try std.testing.expectEqualStrings("pusty", fieldValue(mem, "Mapa gniazd", "#1 DIMM 0").?);
+    try std.testing.expect(std.mem.startsWith(u8, fieldValue(mem, "Mapa gniazd", "#2 DIMM 1").?, "16 GB DDR4"));
+    try std.testing.expectEqualStrings("dwukanałowo (A+B)", fieldValue(mem, "Mapa gniazd", "Tryb pracy kanałów").?);
+
+    // JSON: tablica `slots` ze stałymi kluczami.
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    try sys_report.writeJson(&out.writer, st.reportOf(pages), .{});
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, out.written(), .{});
+    defer parsed.deinit();
+    var found = false;
+    for (parsed.value.object.get("pages").?.array.items) |p| {
+        const slots = p.object.get("slots") orelse continue;
+        found = true;
+        try std.testing.expectEqualStrings("memory", p.object.get("id").?.string);
+        const s1 = slots.array.items[1].object;
+        try std.testing.expectEqual(@as(i64, 2), s1.get("index").?.integer);
+        try std.testing.expectEqualStrings("A2", s1.get("label").?.string);
+        try std.testing.expectEqualStrings("A", s1.get("channel").?.string);
+        try std.testing.expect(s1.get("occupied").?.bool);
+        try std.testing.expectEqual(@as(i64, 17179869184), s1.get("size_bytes").?.integer);
+        try std.testing.expectEqualStrings("DDR4", s1.get("type").?.string);
+        try std.testing.expect(slots.array.items[0].object.get("size_bytes").? == .null);
+    }
+    try std.testing.expect(found);
+}
+
 test "sysimg replay: grafika z DXGI + pci.ids (chip, karta, łącze)" {
     const st = try replayState();
     defer st.destroy();

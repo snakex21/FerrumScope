@@ -817,5 +817,19 @@
   "dokładna strona sterowników (przypięta przez użytkownika)": "exact driver page (pinned by the user)",
   "dokładna strona sterowników (tabela kuratorowana)": "exact driver page (curated table)",
   "strona sterowników wyprowadzona z wykrytego modelu": "driver page derived from the detected model",
-  "ogólna strona sterowników producenta": "vendor's general driver page"
+  "ogólna strona sterowników producenta": "vendor's general driver page",
+  "Mapa gniazd": "Memory slot map",
+  "liczba struktur SMBIOS typ 17 (z pustymi gniazdami)": "number of SMBIOS type 17 structures (including empty slots)",
+  "SMBIOS typ 16 deklaruje: {n}": "SMBIOS type 16 declares: {n}",
+  "obsadzona para A2+B2 — zwykle zalecana dla dwóch modułów (sprawdź instrukcję płyty)": "A2+B2 pair populated — usually the recommended pair for two modules (check the board manual)",
+  "dla dwóch modułów zwykle zalecana jest para A2+B2 (sprawdź instrukcję płyty)": "for two modules the A2+B2 pair is usually recommended (check the board manual)",
+  "Tryb pracy kanałów": "Channel mode",
+  "brak obsadzonych gniazd": "no populated slots",
+  "jeden moduł — praca jednokanałowa": "one module — single-channel operation",
+  "jedno obsadzone gniazdo (SMBIOS typ 17)": "one populated slot (SMBIOS type 17)",
+  "dwukanałowo ({channels})": "dual-channel ({channels})",
+  "wielokanałowo ({channels})": "multi-channel ({channels})",
+  "moduły w jednym kanale — możliwe działanie w single-channel": "modules in one channel — may run in single-channel mode",
+  "nieznany rozmiar": "unknown size",
+  "etykieta {label} (heurystyka z nazw gniazd)": "label {label} (heuristic from slot names)"
 }

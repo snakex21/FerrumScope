@@ -20,6 +20,8 @@ const links = @import("links.zig");
 const lookup = @import("lookup.zig");
 const drivers = @import("drivers.zig");
 const i18n = @import("../i18n/i18n.zig");
+const memslots = @import("memslots.zig");
+const vendors = @import("../gui/vendors.zig");
 
 const Builder = report.Builder;
 const Field = report.Field;
@@ -396,6 +398,8 @@ pub fn buildMemory(arena: std.mem.Allocator, c: Ctx) report.Page {
     }
     b.add(.{ .label = b.t("Timingi (SPD)"), .value = "—", .state = .requires_driver, .confidence = .unknown, .source = b.t("odczyt SPD przez SMBus wymaga sterownika — planowane") });
 
+    addSlotMap(&b, tbl);
+
     var it = tbl.iterator();
     while (it.next()) |s| {
         if (s.type_id == 16) {
@@ -449,6 +453,115 @@ pub fn buildMemory(arena: std.mem.Allocator, c: Ctx) report.Page {
         if (d.data_width_bits) |w| if (w.value) |v| b.add(.{ .label = b.t("Szerokość danych"), .value = b.fmt("{d} bit", .{v}), .source = w.spec });
     }
     return page;
+}
+
+/// Nazwa wyświetlana i klucz producenta modułu: pole producenta SMBIOS
+/// (nazwa albo kod JEDEC), a gdy to zaślepka — numer części.
+fn moduleVendor(manufacturer: []const u8, part_number: []const u8) struct { name: []const u8, key: []const u8 } {
+    const key = vendors.normalize(manufacturer) orelse memslots.partNumberVendorKey(part_number) orelse
+        return .{ .name = manufacturer, .key = "" };
+    return .{ .name = vendors.displayName(key), .key = key };
+}
+
+/// Sekcja „Mapa gniazd”: wszystkie gniazda typ 17 (także puste) + podpowiedź
+/// trybu pracy kanałów; wypełnia też `page.slots` (GUI i eksport JSON).
+fn addSlotMap(b: *Builder, tbl: smbios.Table) void {
+    var devs: std.ArrayList(smbios.MemoryDevice) = .empty;
+    var declared: ?u32 = null;
+    var it = tbl.iterator();
+    while (it.next()) |s| {
+        if (smbios.decodeMemoryArray(s)) |a| {
+            if (a.num_devices) |nd| declared = (declared orelse 0) + nd.raw;
+        }
+        if (smbios.decodeMemoryDevice(s)) |d| devs.append(b.arena, d) catch return;
+    }
+    if (devs.items.len == 0) return;
+    const map = memslots.build(b.arena, devs.items) catch return;
+
+    b.section(b.t("Mapa gniazd"));
+    const n_slots = map.slots.len;
+    b.add(.{
+        .label = b.t("Liczba gniazd"),
+        .value = b.fmt("{d}", .{n_slots}),
+        .source = b.t("liczba struktur SMBIOS typ 17 (z pustymi gniazdami)"),
+        .confidence = if (declared == null or declared.? == n_slots) .high else .medium,
+        .note = if (declared) |d| (if (d != n_slots) b.tf("SMBIOS typ 16 deklaruje: {n}", .{ .n = d }) else "") else "",
+    });
+
+    // Podpowiedź trybu kanałów.
+    const h = map.hint;
+    var chs: std.ArrayList(u8) = .empty;
+    for (h.channels(), 0..) |c, i| {
+        if (i > 0) chs.append(b.arena, '+') catch {};
+        chs.append(b.arena, c) catch {};
+    }
+    const hint_src = b.t("heurystyka z nazw gniazd (Device/Bank Locator)");
+    const pair_note: []const u8 = if (h.recommended_pair) |ok|
+        (if (ok) b.t("obsadzona para A2+B2 — zwykle zalecana dla dwóch modułów (sprawdź instrukcję płyty)") else b.t("dla dwóch modułów zwykle zalecana jest para A2+B2 (sprawdź instrukcję płyty)"))
+    else
+        "";
+    switch (h.kind) {
+        .none => b.add(.{ .label = b.t("Tryb pracy kanałów"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.t("brak obsadzonych gniazd") }),
+        .unknown => b.add(.{ .label = b.t("Tryb pracy kanałów"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.t("nie da się wywnioskować z nazw gniazd") }),
+        .single_module => b.add(.{ .label = b.t("Tryb pracy kanałów"), .value = b.t("jeden moduł — praca jednokanałowa"), .state = .estimate, .confidence = .high, .source = b.t("jedno obsadzone gniazdo (SMBIOS typ 17)") }),
+        .multi_channel => b.add(.{
+            .label = b.t("Tryb pracy kanałów"),
+            .value = if (h.channels().len == 2) b.tf("dwukanałowo ({channels})", .{ .channels = chs.items }) else b.tf("wielokanałowo ({channels})", .{ .channels = chs.items }),
+            .state = .estimate,
+            .confidence = smConf(h.confidence),
+            .source = hint_src,
+            .note = pair_note,
+        }),
+        .same_channel => b.add(.{
+            .label = b.t("Tryb pracy kanałów"),
+            .value = b.t("moduły w jednym kanale — możliwe działanie w single-channel"),
+            .state = .estimate,
+            .confidence = smConf(h.confidence),
+            .source = hint_src,
+            .note = pair_note,
+        }),
+    }
+
+    const out = b.arena.alloc(report.MemSlot, n_slots) catch return;
+    for (map.slots, out) |sl, *o| {
+        const loc = if (sl.locator.len > 0) sl.locator else sl.label;
+        const type_name: []const u8 = if (sl.mem_type) |t| smbios.memoryTypeName(t) orelse "" else "";
+        const v = moduleVendor(sl.manufacturer, sl.part_number);
+        const channel: []const u8 = if (sl.label_derived) std.mem.trimRight(u8, sl.label, "0123456789") else "";
+        o.* = .{
+            .index = sl.index,
+            .locator = sl.locator,
+            .bank = sl.bank,
+            .label = sl.label,
+            .channel = channel,
+            .channel_confidence = smConf(sl.confidence),
+            .occupied = sl.occupied,
+            .size_bytes = sl.size_bytes,
+            .mem_type = type_name,
+            .manufacturer = sl.manufacturer,
+            .vendor = if (v.key.len > 0) v.name else "",
+            .vendor_key = v.key,
+        };
+        const field_label = b.fmt("#{d} {s}", .{ sl.index, loc });
+        const src = b.fmt("SMBIOS typ 17 (Device/Bank Locator: {s} / {s})", .{ if (sl.locator.len > 0) sl.locator else "—", if (sl.bank.len > 0) sl.bank else "—" });
+        const note: []const u8 = if (sl.label_derived) b.tf("etykieta {label} (heurystyka z nazw gniazd)", .{ .label = sl.label }) else "";
+        if (!sl.occupied) {
+            b.add(.{ .label = field_label, .value = b.t("pusty"), .source = src, .note = note });
+            continue;
+        }
+        var val: std.ArrayList(u8) = .empty;
+        val.appendSlice(b.arena, if (sl.size_bytes) |n| bytesLabel(b, n) else b.t("nieznany rozmiar")) catch {};
+        if (type_name.len > 0) {
+            val.append(b.arena, ' ') catch {};
+            val.appendSlice(b.arena, type_name) catch {};
+        }
+        if (v.name.len > 0) {
+            val.appendSlice(b.arena, " · ") catch {};
+            val.appendSlice(b.arena, v.name) catch {};
+        }
+        b.add(.{ .label = field_label, .value = val.items, .source = src, .note = note });
+    }
+    b.page.slots = out;
 }
 
 // ---------------------------------------------------------------------------
