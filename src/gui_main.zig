@@ -101,6 +101,11 @@ const App = struct {
     /// stron. Bez niego wnętrza ramek grup (przezroczystych) nie byłyby
     /// zamalowywane po przełączeniu zakładki.
     panel: ?w.HWND = null,
+    /// Osobny kontener na każdą zakładkę (dziecko `panel`). Ukrycie kontenera
+    /// ukrywa wszystkie kontrolki zakładki naraz — także te, których nie ma
+    /// w tabelach `cells`/`groups`/`extras` — i wymusza przemalowanie odsłoniętego
+    /// obszaru, więc nic z innej zakładki nie „prześwituje”.
+    tab_panels: [n_tabs]?w.HWND = @splat(null),
     lv: ?w.HWND = null,
     ttl: ?w.HWND = null,
     btn_refresh: ?w.HWND = null,
@@ -379,6 +384,7 @@ fn createForms() void {
     const child = w.WS_CHILD;
     for (&forms.tabs, 0..) |*t, ti| {
         const tab: u8 = @intCast(ti);
+        create_parent = app.tab_panels[ti] orelse app.panel;
         // Teksty z forms.zig są identyfikatorami katalogu — tłumaczymy je tutaj.
         if (t.selector) |s| {
             app.sel_label[ti] = createText(L("STATIC"), i18n.t(s.label), 0, child | w.SS_LEFT | w.SS_NOPREFIX | w.SS_ENDELLIPSIS, 0);
@@ -386,7 +392,9 @@ fn createForms() void {
         }
         for (t.bands) |band| for (band) |*g| {
             if (app.n_groups < max_groups) {
-                app.groups[app.n_groups] = .{ .tab = tab, .hwnd = createText(L("BUTTON"), i18n.t(g.title), 0, child | w.BS_GROUPBOX, 0) };
+                // Ramka przed swoimi polami i z WS_CLIPSIBLINGS: nie zamalowuje
+                // pól, które leżą w jej wnętrzu.
+                app.groups[app.n_groups] = .{ .tab = tab, .hwnd = createText(L("BUTTON"), i18n.t(g.title), 0, child | w.WS_CLIPSIBLINGS | w.BS_GROUPBOX, 0) };
                 app.n_groups += 1;
             }
             for (g.rows) |row| for (row) |*c| {
@@ -411,6 +419,7 @@ fn createForms() void {
         };
     }
     createSpecialTabs();
+    create_parent = app.panel;
 }
 
 fn extra(tab: usize, h: ?w.HWND) void {
@@ -427,10 +436,12 @@ fn createSpecialTabs() void {
     @setEvalBranchQuota(50000);
     const st = w.WS_CHILD | w.SS_LEFT | w.SS_NOPREFIX;
     // --- Bench (zapowiedź) ---------------------------------------------------
-    extra(ix_bench, createText(L("BUTTON"), i18n.t("Benchmark i test obciążeniowy"), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
+    create_parent = app.tab_panels[ix_bench] orelse app.panel;
+    extra(ix_bench, createText(L("BUTTON"), i18n.t("Benchmark i test obciążeniowy"), 0, w.WS_CHILD | w.WS_CLIPSIBLINGS | w.BS_GROUPBOX, 0));
     extra(ix_bench, createText(L("STATIC"), i18n.t("Planowane: test wydajności jednego wątku i wszystkich wątków oraz test stabilności pod obciążeniem.\n\nW tej wersji nic nie jest mierzone ani uruchamiane — zakładka tylko rezerwuje miejsce. Wyniki będą miały to samo źródło i pewność co reszta programu."), 0, st, 0));
     // --- O programie ----------------------------------------------------------
-    extra(ix_about, createChild(L("BUTTON"), L("FerrumScope"), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
+    create_parent = app.tab_panels[ix_about] orelse app.panel;
+    extra(ix_about, createChild(L("BUTTON"), L("FerrumScope"), 0, w.WS_CHILD | w.WS_CLIPSIBLINGS | w.BS_GROUPBOX, 0));
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const a = arena.allocator();
@@ -439,14 +450,16 @@ fn createSpecialTabs() void {
     const h = createChild(L("STATIC"), null, 0, st, 0);
     setText(h, txt);
     extra(ix_about, h);
-    extra(ix_about, createText(L("BUTTON"), i18n.t("Raport"), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
+    extra(ix_about, createText(L("BUTTON"), i18n.t("Raport"), 0, w.WS_CHILD | w.WS_CLIPSIBLINGS | w.BS_GROUPBOX, 0));
     extra(ix_about, createText(L("BUTTON"), i18n.t("Eksport TXT…"), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_EXPORT_TXT));
     extra(ix_about, createText(L("BUTTON"), i18n.t("Eksport HTML…"), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_EXPORT_HTML));
     extra(ix_about, createText(L("BUTTON"), i18n.t("Eksport JSON…"), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_EXPORT_JSON));
     extra(ix_about, createText(L("STATIC"), i18n.t("Numery seryjne w raporcie są zamaskowane, chyba że zaznaczono „Pokaż numery seryjne”."), 0, st, 0));
-    extra(ix_about, createText(L("BUTTON"), i18n.t("Znaczniki źródeł"), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
+    extra(ix_about, createText(L("BUTTON"), i18n.t("Znaczniki źródeł"), 0, w.WS_CHILD | w.WS_CLIPSIBLINGS | w.BS_GROUPBOX, 0));
     extra(ix_about, createText(L("STATIC"), i18n.t("Najedź na wartość, aby zobaczyć źródło, pewność i surowe dane.\n„Pokaż źródła” dodaje znacznik: W wysoka · Ś średnia · N niska pewność · ~ oszacowanie · Z zaślepka firmware · A wymaga administratora · S wymaga sterownika · – niedostępne."), 0, st, 0));
     // --- Język (prawy górny róg zakładki, w wierszu tytułu; układ w layout()) --
+    // Wiersz tytułu należy do wspólnego panelu, nie do kontenera zakładki.
+    create_parent = app.panel;
     app.lang_label = createText(L("STATIC"), i18n.t("Język:"), 0, w.WS_CHILD | w.SS_RIGHT | w.SS_NOPREFIX | w.SS_ENDELLIPSIS, 0);
     app.lang_combo = createChild(L("COMBOBOX"), null, 0, w.WS_CHILD | w.WS_TABSTOP | w.WS_VSCROLL | w.CBS_DROPDOWNLIST, ID_LANG);
     if (app.lang_combo) |cb| {
@@ -458,9 +471,10 @@ fn createSpecialTabs() void {
         _ = w.SendMessageW(cb, w.CB_SETCURSEL, i18n.indexOf(i18n.locale()) orelse 0, 0);
     }
     // --- Aktualizacje (logika w update/gui.zig, teksty w update/text.zig) -----
+    create_parent = app.tab_panels[ix_about] orelse app.panel;
     const ut = update.text.get();
     var ub: [512]u16 = undefined;
-    extra(ix_about, createChild(L("BUTTON"), widen(&ub, ut.gui_group), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
+    extra(ix_about, createChild(L("BUTTON"), widen(&ub, ut.gui_group), 0, w.WS_CHILD | w.WS_CLIPSIBLINGS | w.BS_GROUPBOX, 0));
     const upd_btn = createChild(L("BUTTON"), widen(&ub, ut.gui_check_button), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, update.gui.ID_CHECK);
     const upd_auto = createChild(L("BUTTON"), widen(&ub, ut.gui_auto_checkbox), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_AUTOCHECKBOX, update.gui.ID_AUTO);
     extra(ix_about, upd_btn);
@@ -567,40 +581,76 @@ fn layoutForm(t: usize, area: w.RECT) void {
     }
 }
 
+/// Wysokość tekstu kontrolki STATIC przy danej szerokości (DT_CALCRECT,
+/// czcionka kontrolki) — ramki zakładek specjalnych mają rozmiar treści,
+/// zamiast stałej wysokości, która przy dłuższych tłumaczeniach wychodziła
+/// poza okno.
+fn textHeight(hh: w.HWND, width: i32) i32 {
+    var wb: [2048]u16 = undefined;
+    const n = GetWindowTextW(hh, &wb, wb.len);
+    const hdc = GetDC(hh);
+    defer _ = ReleaseDC(hh, hdc);
+    const old = SelectObject(hdc, app.font);
+    defer _ = SelectObject(hdc, old);
+    var r: w.RECT = .{ .left = 0, .top = 0, .right = width, .bottom = 0 };
+    // DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX
+    _ = DrawTextW(hdc, &wb, n, &r, 0x10 | 0x400 | 0x800);
+    return r.bottom - r.top + px(4);
+}
+
+extern "user32" fn GetWindowTextW(w.HWND, [*]u16, i32) callconv(.winapi) i32;
+extern "user32" fn GetDC(?w.HWND) callconv(.winapi) ?*anyopaque;
+extern "user32" fn ReleaseDC(?w.HWND, ?*anyopaque) callconv(.winapi) i32;
+
 fn layoutSpecial(t: usize, area: w.RECT) void {
     var y = area.top;
     const x = area.left;
     const width = area.right - area.left;
-    var bx = x + px(M.pad);
-    var in_box_y: i32 = 0;
+    const inner_x = x + px(M.pad);
+    const inner_w = width - 2 * px(M.pad);
+    var bx = inner_x;
+    var row_open = false; // trwa wiersz przycisków
+    var group: ?w.HWND = null;
+    var group_top: i32 = 0;
     for (app.extras[0..app.n_extras]) |e| {
         if (e.tab != t) continue;
         const hh = e.hwnd orelse continue;
-        var cls: [16]u16 = undefined;
-        _ = &cls;
         // Kolejność kontrolek jest stała (createSpecialTabs): ramka, treść, ...
         const is_group = isGroupBox(hh);
         const is_button = !is_group and isButton(hh);
         if (is_group) {
-            if (in_box_y != 0) y = in_box_y + px(M.gap);
-            const h: i32 = if (t == ix_bench) px(150) else px(124);
-            move(hh, x, y, width, h);
-            in_box_y = y + h;
+            if (row_open) y += px(30);
+            row_open = false;
+            if (group) |g| {
+                move(g, x, group_top, width, y + px(6) - group_top);
+                y += px(6) + px(M.gap);
+            }
+            group = hh;
+            group_top = y;
             y += px(M.head) + px(2);
-            bx = x + px(M.pad);
+            bx = inner_x;
         } else if (is_button) {
             // Pole wyboru i dłuższe przyciski (aktualizacje) potrzebują więcej miejsca.
             const style: u32 = @bitCast(GetWindowLongW(hh, -16));
-            const bw: i32 = if ((style & 0xF) == w.BS_AUTOCHECKBOX) px(210) else if (GetWindowLongW(hh, -12) == update.gui.ID_CHECK) px(160) else px(120);
+            const bw: i32 = if ((style & 0xF) == w.BS_AUTOCHECKBOX) px(230) else if (GetWindowLongW(hh, -12) == update.gui.ID_CHECK) px(170) else px(130);
+            if (row_open and bx + bw > inner_x + inner_w) {
+                y += px(30);
+                bx = inner_x;
+            }
             move(hh, bx, y, bw, px(26));
             bx += bw + px(6);
+            row_open = true;
         } else {
-            if (bx != x + px(M.pad)) y += px(32);
-            move(hh, x + px(M.pad), y, width - 2 * px(M.pad), px(80));
-            y += px(80);
-            bx = x + px(M.pad);
+            if (row_open) y += px(30);
+            row_open = false;
+            const th = textHeight(hh, inner_w);
+            move(hh, inner_x, y, inner_w, th);
+            y += th;
+            bx = inner_x;
         }
     }
+    if (row_open) y += px(30);
+    if (group) |g| move(g, x, group_top, width, y + px(6) - group_top);
 }
 
 extern "user32" fn GetWindowLongW(w.HWND, i32) callconv(.winapi) i32;
@@ -836,6 +886,7 @@ fn updateVisibility() void {
     const t = app.current;
     const list = usesList(t);
     show(app.lv, list);
+    for (app.tab_panels, 0..) |h, i| show(h, i == t and !list);
     for (app.cells[0..app.n_cells]) |c| {
         const vis = !list and c.tab == t;
         show(c.lbl, vis);
@@ -1018,10 +1069,14 @@ fn layout() void {
     } else move(app.ttl, pad, px(4), pw - 2 * pad, ttl_h);
     const area: w.RECT = .{ .left = pad, .top = px(6) + ttl_h, .right = pw - pad, .bottom = ph - pad };
     move(app.lv, area.left, area.top, area.right - area.left, area.bottom - area.top);
+    // Kontenery zakładek zajmują obszar treści; kontrolki układamy we
+    // współrzędnych kontenera.
+    for (app.tab_panels) |h| move(h, area.left, area.top, area.right - area.left, area.bottom - area.top);
+    const local: w.RECT = .{ .left = 0, .top = 0, .right = area.right - area.left, .bottom = area.bottom - area.top };
     const t = app.current;
     switch (forms.tabs[t].kind) {
-        .form => layoutForm(t, area),
-        .bench, .about => layoutSpecial(t, area),
+        .form => layoutForm(t, local),
+        .bench, .about => layoutSpecial(t, local),
         .sensors => {},
     }
     // Pasek dolny.
@@ -1312,6 +1367,9 @@ pub fn wWinMain(inst: w.HINSTANCE, _: ?w.HINSTANCE, cmd_ptr: [*:0]u16, show_cmd:
         _ = w.SendMessageW(tip, w.TTM_SETDELAYTIME, w.TTDT_AUTOPOP, 30000);
     }
     app.panel = w.CreateWindowExW(0, panel_class, null, w.WS_CHILD | w.WS_VISIBLE | w.WS_CLIPCHILDREN, 0, 0, 10, 10, hwnd, null, inst, null);
+    for (&app.tab_panels) |*tp| {
+        tp.* = w.CreateWindowExW(0, panel_class, null, w.WS_CHILD | w.WS_CLIPCHILDREN | w.WS_CLIPSIBLINGS, 0, 0, 10, 10, app.panel, null, inst, null);
+    }
     create_parent = app.panel;
     app.ttl = createChild(L("STATIC"), null, 0, w.WS_CHILD | w.WS_VISIBLE | w.SS_LEFT | w.SS_NOPREFIX | w.SS_ENDELLIPSIS, 0);
     app.lv = createChild(L("SysListView32"), null, 0, w.WS_CHILD | w.WS_TABSTOP | w.LVS_REPORT | w.LVS_SINGLESEL | w.LVS_SHOWSELALWAYS | w.LVS_NOSORTHEADER | w.LVS_SHAREIMAGELISTS, 0);
@@ -1670,7 +1728,7 @@ fn createBadges(inst: w.HINSTANCE) void {
         const k = t.badge orelse continue;
         if (n >= badges.len) break;
         badges[n] = .{ .tab = ti, .kind = k };
-        badges[n].hwnd = w.CreateWindowExW(0, badge_class, null, w.WS_CHILD, 0, 0, 10, 10, app.panel, null, inst, null);
+        badges[n].hwnd = w.CreateWindowExW(0, badge_class, null, w.WS_CHILD, 0, 0, 10, 10, app.tab_panels[ti] orelse app.panel, null, inst, null);
         addTip(badges[n].hwnd);
         n += 1;
     }
