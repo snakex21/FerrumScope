@@ -280,12 +280,13 @@ test "windows: liczba logical processors jest sensowna" {
     const b = create();
     const n = try okOrSkip(u32, b.logicalCpuCount());
     try testing.expect(n >= 1);
-    // ALL_PROCESSOR_GROUPS musi uwzględniać wszystkie grupy. Na maszynie
-    // jednoprocesorowej nie da się tego odróżnić, więc sprawdzamy tylko
-    // spójność z CPUID leaf 1.
-    const leaf1 = try okOrSkip(backend.Regs, b.readCpuid(1, 0));
-    const from_cpuid: u32 = (leaf1.ebx >> 16) & 0xFF;
-    try testing.expect(n >= @min(from_cpuid, 64));
+    // ALL_PROCESSOR_GROUPS musi uwzględniać wszystkie grupy, więc wynik nie
+    // może być mniejszy niż liczba CPU bieżącej grupy (std: GetSystemInfo).
+    // Nie porównujemy z CPUID leaf 1 EBX[23:16]: to maksymalna liczba
+    // adresowalnych ID w pakiecie (potęga dwójki), nie liczba widocznych
+    // procesorów — na maszynach wirtualnych (runnery CI) bywa większa.
+    const in_group = std.Thread.getCpuCount() catch return error.SkipZigTest;
+    try testing.expect(n >= in_group);
 }
 
 test "windows: CPUID na wskazanym CPU zwraca tego samego vendora" {
