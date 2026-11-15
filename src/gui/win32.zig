@@ -365,3 +365,130 @@ comptime {
     if (@sizeOf(usize) == 8 and @sizeOf(NMLVCUSTOMDRAW) != 136) @compileError("NMLVCUSTOMDRAW: zły rozmiar");
     if (@sizeOf(usize) == 8 and @sizeOf(LVGROUP) != 152) @compileError("LVGROUP: zły rozmiar");
 }
+
+// --- dodatki dla zakładek systemowych, przycisków i eksportu ----------------
+pub const WM_COMMAND: u32 = 0x0111;
+pub const BN_CLICKED: u32 = 0;
+pub const BS_PUSHBUTTON: u32 = 0x0000;
+pub const BS_AUTOCHECKBOX: u32 = 0x0003;
+pub const BM_GETCHECK: u32 = 0x00F0;
+pub const BST_CHECKED: LRESULT = 1;
+pub const LVM_DELETEALLITEMS: u32 = LVM_FIRST + 9;
+pub const LVM_GETITEMCOUNT: u32 = LVM_FIRST + 4;
+pub const LVM_REMOVEALLGROUPS: u32 = LVM_FIRST + 160;
+pub const LVM_GETTOPINDEX: u32 = LVM_FIRST + 39;
+pub const LVM_ENSUREVISIBLE: u32 = LVM_FIRST + 19;
+pub const WM_SETREDRAW: u32 = 0x000B;
+pub const SW_SHOWNORMAL: i32 = 1;
+pub const MB_OK: u32 = 0x0000;
+pub const MB_ICONINFORMATION: u32 = 0x0040;
+pub const MB_ICONWARNING: u32 = 0x0030;
+pub const OFN_OVERWRITEPROMPT: u32 = 0x0000_0002;
+pub const OFN_PATHMUSTEXIST: u32 = 0x0000_0800;
+pub const OFN_NOCHANGEDIR: u32 = 0x0000_0008;
+
+pub const OPENFILENAMEW = extern struct {
+    lStructSize: u32 = @sizeOf(OPENFILENAMEW),
+    hwndOwner: ?HWND = null,
+    hInstance: ?HINSTANCE = null,
+    lpstrFilter: ?[*]const u16 = null,
+    lpstrCustomFilter: ?[*]u16 = null,
+    nMaxCustFilter: u32 = 0,
+    nFilterIndex: u32 = 0,
+    lpstrFile: [*]u16,
+    nMaxFile: u32,
+    lpstrFileTitle: ?[*]u16 = null,
+    nMaxFileTitle: u32 = 0,
+    lpstrInitialDir: ?[*:0]const u16 = null,
+    lpstrTitle: ?[*:0]const u16 = null,
+    Flags: u32 = 0,
+    nFileOffset: u16 = 0,
+    nFileExtension: u16 = 0,
+    lpstrDefExt: ?[*:0]const u16 = null,
+    lCustData: LPARAM = 0,
+    lpfnHook: ?*anyopaque = null,
+    lpTemplateName: ?[*:0]const u16 = null,
+    pvReserved: ?*anyopaque = null,
+    dwReserved: u32 = 0,
+    FlagsEx: u32 = 0,
+};
+
+pub extern "comdlg32" fn GetSaveFileNameW(*OPENFILENAMEW) callconv(.winapi) BOOL;
+pub extern "shell32" fn ShellExecuteW(?HWND, ?[*:0]const u16, [*:0]const u16, ?[*:0]const u16, ?[*:0]const u16, i32) callconv(.winapi) ?*anyopaque;
+pub extern "user32" fn MessageBoxW(?HWND, [*:0]const u16, [*:0]const u16, u32) callconv(.winapi) i32;
+pub extern "user32" fn EnableWindow(HWND, BOOL) callconv(.winapi) BOOL;
+pub extern "user32" fn InvalidateRect(?HWND, ?*const RECT, BOOL) callconv(.winapi) BOOL;
+
+comptime {
+    if (@sizeOf(usize) == 8 and @sizeOf(OPENFILENAMEW) != 152) @compileError("OPENFILENAMEW: zły rozmiar");
+}
+
+// --- widok uporządkowany: ramki, pola tylko-do-odczytu, listy, podpowiedzi ---
+pub const BS_GROUPBOX: u32 = 0x0007;
+pub const ES_MULTILINE: u32 = 0x0004;
+pub const ES_AUTOHSCROLL: u32 = 0x0080;
+pub const ES_READONLY: u32 = 0x0800;
+pub const WS_BORDER: u32 = 0x0080_0000;
+pub const WS_VSCROLL: u32 = 0x0020_0000;
+pub const CBS_DROPDOWNLIST: u32 = 0x0003;
+pub const CB_ADDSTRING: u32 = 0x0143;
+pub const CB_GETCURSEL: u32 = 0x0147;
+pub const CB_RESETCONTENT: u32 = 0x014B;
+pub const CB_SETCURSEL: u32 = 0x014E;
+pub const CB_GETCOUNT: u32 = 0x0146;
+pub const CBN_SELCHANGE: u32 = 1;
+pub const WM_CTLCOLOREDIT: u32 = 0x0133;
+pub const WM_KEYDOWN: u32 = 0x0100;
+pub const VK_CONTROL: i32 = 0x11;
+pub const VK_F5: usize = 0x74;
+pub const ICC_BAR_CLASSES: u32 = 0x0004;
+pub const ICC_STANDARD_CLASSES: u32 = 0x4000;
+
+pub const TTS_ALWAYSTIP: u32 = 0x01;
+pub const TTS_NOPREFIX: u32 = 0x02;
+pub const TTF_IDISHWND: u32 = 0x0001;
+pub const TTF_SUBCLASS: u32 = 0x0010;
+pub const TTM_SETMAXTIPWIDTH: u32 = 0x0400 + 24;
+pub const TTM_SETDELAYTIME: u32 = 0x0400 + 3;
+pub const TTM_ADDTOOLW: u32 = 0x0400 + 50;
+pub const TTDT_AUTOPOP: usize = 2;
+/// `TTN_FIRST - 10`, `TTN_FIRST = 0U - 520U`.
+pub const TTN_GETDISPINFOW: u32 = @bitCast(@as(i32, -530));
+pub const LPSTR_TEXTCALLBACKW: usize = std.math.maxInt(usize);
+
+pub const TTTOOLINFOW = extern struct {
+    cbSize: u32 = @sizeOf(TTTOOLINFOW),
+    uFlags: u32 = 0,
+    hwnd: ?HWND = null,
+    uId: usize = 0,
+    rect: RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+    hinst: ?HINSTANCE = null,
+    lpszText: usize = 0,
+    lParam: LPARAM = 0,
+    lpReserved: ?*anyopaque = null,
+};
+
+pub const NMTTDISPINFOW = extern struct {
+    hdr: NMHDR,
+    lpszText: ?[*:0]const u16,
+    szText: [80]u16,
+    hinst: ?HINSTANCE,
+    uFlags: u32,
+    lParam: LPARAM,
+};
+
+pub const HKEY = *opaque {};
+pub const HKEY_CURRENT_USER: HKEY = @ptrFromInt(0x8000_0001);
+pub const RRF_RT_REG_DWORD: u32 = 0x0000_0010;
+pub const REG_DWORD: u32 = 4;
+pub extern "advapi32" fn RegGetValueW(HKEY, [*:0]const u16, [*:0]const u16, u32, ?*u32, ?*anyopaque, ?*u32) callconv(.winapi) i32;
+pub extern "advapi32" fn RegSetKeyValueW(HKEY, [*:0]const u16, [*:0]const u16, u32, ?*const anyopaque, u32) callconv(.winapi) i32;
+pub extern "user32" fn GetKeyState(i32) callconv(.winapi) i16;
+pub extern "gdi32" fn CreateSolidBrush(u32) callconv(.winapi) ?HBRUSH;
+pub extern "user32" fn SetFocus(?HWND) callconv(.winapi) ?HWND;
+
+comptime {
+    if (@sizeOf(usize) == 8 and @sizeOf(TTTOOLINFOW) != 72) @compileError("TTTOOLINFOW: zły rozmiar");
+    if (@sizeOf(usize) == 8 and @sizeOf(NMTTDISPINFOW) != 216) @compileError("NMTTDISPINFOW: zły rozmiar");
+}
+const std = @import("std");

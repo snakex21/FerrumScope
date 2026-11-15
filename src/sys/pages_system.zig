@@ -346,6 +346,18 @@ pub fn buildMemory(arena: std.mem.Allocator, c: Ctx) report.Page {
     } else {
         b.add(.{ .label = "Kanały", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "nie da się wywnioskować z nazw gniazd" });
     }
+    // Prędkość pierwszego obsadzonego modułu — jak „DRAM Frequency” w CPU-Z.
+    var it0 = tbl.iterator();
+    while (it0.next()) |s0| {
+        if (s0.type_id != 17) continue;
+        const d0 = smbios.decodeMemoryDevice(s0) orelse continue;
+        if (!d0.populated()) continue;
+        if (d0.configured_speed) |sp0| if (sp0.mts) |v| {
+            b.add(.{ .label = "Prędkość", .value = b.fmt("{d} MT/s", .{v}), .source = sp0.spec });
+            b.add(.{ .label = "Częstotliwość DRAM", .value = b.fmt("{d} MHz", .{v / 2}), .source = "Configured Memory Speed / 2 (DDR)", .confidence = .high });
+        };
+        break;
+    }
     b.add(.{ .label = "Timingi (SPD)", .value = "—", .state = .requires_driver, .confidence = .unknown, .source = "odczyt SPD przez SMBus wymaga sterownika — planowane" });
 
     var it = tbl.iterator();
@@ -463,7 +475,7 @@ pub fn buildGraphics(arena: std.mem.Allocator, c: Ctx, live: GpuLive) report.Pag
             page.headline = b.dup(g.name);
             first = false;
         }
-        b.section(b.dup(g.name));
+        b.section(b.fmt("GPU: {s}", .{g.name}));
         b.add(.{ .label = "Nazwa (sterownik)", .value = b.dup(g.name), .source = "DXGI_ADAPTER_DESC1.Description" });
         if (chip) |n| b.add(.{ .label = "Układ GPU", .value = n, .source = pciSource(&b, c) }) else b.add(.{ .label = "Układ GPU", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "brak w pci.ids" });
         if (board) |n| {
@@ -491,7 +503,7 @@ pub fn buildGraphics(arena: std.mem.Allocator, c: Ctx, live: GpuLive) report.Pag
         }
 
         // --- telemetria producenta ------------------------------------------------
-        b.section(b.fmt("{s} — czujniki", .{g.name}));
+        b.section(b.fmt("Czujniki GPU: {s}", .{g.name}));
         if (matchVendorAdapter(live, g, pci)) |a| {
             const r = a.readings;
             const why = b.fmt("{s}: brak odczytu tej wartości ({s})", .{ a.vendor_library, a.sensor_path });
@@ -514,7 +526,7 @@ pub fn buildGraphics(arena: std.mem.Allocator, c: Ctx, live: GpuLive) report.Pag
                 b.add(.{ .label = l, .value = "—", .state = .unavailable, .confidence = .unknown, .source = why });
             }
         }
-        links.gpu(&b, g.vendor, if (board) |n| n else g.name);
+        links.gpuScoped(&b, g.vendor, if (board) |n| n else g.name, b.dup(g.name));
     }
     if (first) page.headline = "Brak sprzętowej karty graficznej";
     return page;

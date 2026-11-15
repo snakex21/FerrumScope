@@ -14,6 +14,7 @@
         "build.zig.zon",
         "src",
         "db",
+        "assets",
         "tools/hwdb_compile.zig",
         "tools/pciids_compile.zig",
         "README.md",

@@ -67,6 +67,8 @@ pub const Link = struct {
     url: []const u8,
     /// Krótki opis do raportu („wyszukiwanie po nazwie”, „po ID urządzenia”).
     note: []const u8 = "",
+    /// Którego obiektu dotyczy (np. nazwa karty), gdy strona ma ich kilka.
+    scope: []const u8 = "",
 };
 
 pub const Section = struct {
@@ -140,19 +142,13 @@ pub const ExportOptions = struct {
 // Maskowanie
 // ---------------------------------------------------------------------------
 
-/// Maskuje numer seryjny: zostawia 2 pierwsze i 2 ostatnie znaki, resztę
-/// zastępuje `*`. Krótkie (≤ 10) maskuje w całości — z 4 jawnych znaków
-/// krótkiego numeru dałoby się go odtworzyć.
+/// Maskuje numer seryjny w całości (`*` w miejsce każdego znaku). Długość
+/// zostaje, żeby było widać, że wartość istnieje; żaden znak nie jest
+/// ujawniany — nawet fragment numeru bywa wystarczający do identyfikacji.
 pub fn mask(value: []const u8, buf: []u8) []const u8 {
     const v = std.mem.trim(u8, value, " ");
-    if (v.len == 0) return v;
     const n = @min(v.len, buf.len);
-    if (v.len <= 10) {
-        @memset(buf[0..n], '*');
-        return buf[0..n];
-    }
-    @memcpy(buf[0..n], v[0..n]);
-    for (buf[2 .. n - 2]) |*c| c.* = '*';
+    @memset(buf[0..n], '*');
     return buf[0..n];
 }
 
@@ -439,7 +435,7 @@ fn samplePage(arena: std.mem.Allocator) !Page {
 
 test "report: maskowanie numerów seryjnych" {
     var buf: [64]u8 = undefined;
-    try testing.expectEqualStrings("AB*******67", mask("ABCD1234567", &buf));
+    try testing.expectEqualStrings("***********", mask("ABCD1234567", &buf));
     try testing.expectEqualStrings("******", mask("ABC123", &buf));
     try testing.expectEqualStrings("", mask("   ", &buf));
 }
@@ -457,7 +453,7 @@ test "report: TXT maskuje serial domyślnie i pokazuje go na życzenie" {
     try writeText(&out.writer, r, .{});
     const masked = out.written();
     try testing.expect(std.mem.indexOf(u8, masked, "ABCD1234567") == null);
-    try testing.expect(std.mem.indexOf(u8, masked, "AB*******67") != null);
+    try testing.expect(std.mem.indexOf(u8, masked, "***********") != null);
     try testing.expect(std.mem.indexOf(u8, masked, "wymaga sterownika") != null);
 
     var out2: std.Io.Writer.Allocating = .init(testing.allocator);

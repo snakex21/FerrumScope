@@ -67,6 +67,14 @@ pub fn gpu(b: *report.Builder, vendor: u16, name: []const u8) void {
     }
 }
 
+/// Jak `gpu`, ale każdy odnośnik oznaczony `scope` (np. nazwą karty), żeby GUI
+/// mogło pokazać przyciski właściwej karty przy kilku GPU.
+pub fn gpuScoped(b: *report.Builder, vendor: u16, name: []const u8, scope: []const u8) void {
+    const first = b.page.links.items.len;
+    gpu(b, vendor, name);
+    for (b.page.links.items[first..]) |*l| l.scope = scope;
+}
+
 pub fn cpu(b: *report.Builder, vendor: ids.CpuVendor, name: []const u8) void {
     const m: ?[]const u8 = switch (vendor) {
         .amd => "AMD",

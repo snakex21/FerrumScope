@@ -1285,11 +1285,11 @@ test "sysimg replay: grafika z DXGI + pci.ids (chip, karta, łącze)" {
     defer st.destroy();
     const g = findPage(st.buildPages(), "graphics");
     try std.testing.expectEqualStrings("AMD Radeon RX 7900 XTX", g.headline);
-    try std.testing.expect(std.mem.startsWith(u8, fieldValue(g, "AMD Radeon RX 7900 XTX", "Układ GPU").?, "Navi 31"));
-    try std.testing.expectEqualStrings("1849:5304", fieldValue(g, "AMD Radeon RX 7900 XTX", "Subsystem").?);
-    try std.testing.expect(std.mem.indexOf(u8, fieldValue(g, "AMD Radeon RX 7900 XTX", "Łącze PCIe").?, "x16") != null);
+    try std.testing.expect(std.mem.startsWith(u8, fieldValue(g, "GPU: AMD Radeon RX 7900 XTX", "Układ GPU").?, "Navi 31"));
+    try std.testing.expectEqualStrings("1849:5304", fieldValue(g, "GPU: AMD Radeon RX 7900 XTX", "Subsystem").?);
+    try std.testing.expect(std.mem.indexOf(u8, fieldValue(g, "GPU: AMD Radeon RX 7900 XTX", "Łącze PCIe").?, "x16") != null);
     // Replay nie ma bibliotek producenta: czujniki są „niedostępne” z powodem, nie zerem.
-    try std.testing.expectEqualStrings("—", fieldValue(g, "AMD Radeon RX 7900 XTX — czujniki", "Temperatura GPU").?);
+    try std.testing.expectEqualStrings("—", fieldValue(g, "Czujniki GPU: AMD Radeon RX 7900 XTX", "Temperatura GPU").?);
     try std.testing.expect(g.links.items.len >= 2);
 }
 
@@ -1354,4 +1354,60 @@ test "CPU page: cache w stylu „8 x 32 KB” i lista instrukcji z replay" {
         try std.testing.expect(std.mem.indexOf(u8, ins, n) != null);
     }
     try std.testing.expectEqualStrings("x86-64-v3", fieldValue(cpu, "Zestaw instrukcji", "Poziom x86-64").?);
+}
+
+test "GUI: komórki widoku uporządkowanego wskazują istniejące pola raportu" {
+    const forms = @import("gui/forms.zig");
+    const st = try replayState();
+    defer st.destroy();
+    const pages = st.buildPages();
+    var missing: usize = 0;
+    for (forms.tabs) |t| {
+        if (t.kind != .form) continue;
+        const p = forms.findPage(pages, t.page).?;
+        // Moduł 1 jest obsadzony (gniazdo 0 jest puste na tej płycie).
+        const idx: usize = if (std.mem.eql(u8, t.id, "memory")) 1 else 0;
+        for (t.bands) |band| for (band) |g| for (g.rows) |r| for (r) |c| {
+            // Zegary/obciążenie istnieją tylko przy pomiarze na żywo; dyski mają
+            // różne zestawy pól (HDD nie ma zużycia, ATA nie ma błędów nośnika).
+            if (std.mem.eql(u8, c.sect, "Zegary") or std.mem.eql(u8, c.sect, "Obciążenie") or
+                std.mem.eql(u8, t.id, "storage") or std.mem.startsWith(u8, c.sect, "@Czujniki")) continue;
+            if (forms.resolve(p, c, idx) == null) {
+                std.debug.print("brak pola: {s} / {s} / {s}\n", .{ t.id, c.sect, c.field });
+                missing += 1;
+            }
+        };
+    }
+    try std.testing.expectEqual(@as(usize, 0), missing);
+    const g = forms.findPage(pages, "graphics").?;
+    try std.testing.expectEqual(@as(usize, 1), forms.instanceCount(g, "GPU: "));
+    try std.testing.expect(forms.findLink(g, "Szukaj karty", forms.instanceName(g, "GPU: ", 0).?) != null);
+}
+
+test "GUI: każdy klucz logo z build.zig ma plik i jest poprawnym PNG" {
+    const logos = @import("logos_embedded");
+    try std.testing.expect(logos.all.len >= 18);
+    for (logos.all) |l| {
+        try std.testing.expect(std.mem.startsWith(u8, l.bytes, "\x89PNG\r\n\x1a\n"));
+    }
+    // Łańcuch dla 5800X3D trafia w `amd-ryzen` (nie ma osobnego `amd-ryzen-7`).
+    const badge = @import("gui/badge.zig");
+    var t: badge.Text = .{};
+    badge.fromCpu(&t, "amd", "AMD Ryzen 7 5800X3D 8-Core Processor");
+    var st: [6][64]u8 = undefined;
+    var out: [6][]const u8 = undefined;
+    var found: ?[]const u8 = null;
+    for (badge.logoKeys(t.badge, &st, &out)) |k| {
+        for (logos.all) |l| if (found == null and std.mem.eql(u8, l.name, k)) {
+            found = l.name;
+        };
+    }
+    try std.testing.expectEqualStrings("amd-ryzen", found.?);
+}
+
+// Testy modułów GUI niezależnych od okna (układ formularzy, plakietka, WIC-fit).
+comptime {
+    _ = @import("gui/forms.zig");
+    _ = @import("gui/badge.zig");
+    _ = @import("gui/image.zig");
 }

@@ -263,6 +263,17 @@ pub const State = struct {
         return lv;
     }
 
+    /// Zegar zewnętrzny CPU z SMBIOS typ 4 (do „Zegar magistrali” i mnożnika).
+    fn busMhz(self: *State) ?u32 {
+        const buf = self.snap.smbios orelse return null;
+        const t = ferrum.sys.smbios.fromRawSmbiosData(buf) catch return null;
+        const s = t.find(4) orelse return null;
+        const p = ferrum.sys.smbios.decodeProcessor(s) orelse return null;
+        const n = p.external_clock_mhz orelse return null;
+        const v = n.value orelse return null;
+        return if (v > 0) v else null;
+    }
+
     pub fn cpuPage(self: *State, a: std.mem.Allocator) report.Page {
         if (!self.cpu_ok) {
             var p: report.Page = .{ .id = "cpu", .title = "CPU", .headline = "Procesor niedostępny" };
@@ -279,6 +290,7 @@ pub const State = struct {
             .hwdb_revision = self.hwdb_revision,
             .origin = self.cpu_origin,
             .live = self.liveCpu(),
+            .bus_mhz = self.busMhz(),
         });
     }
 

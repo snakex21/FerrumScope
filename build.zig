@@ -119,6 +119,33 @@ pub fn build(b: *std.Build) void {
         \\pub const sys_asrock_b550 = @embedFile("sys_asrock_b550.sysimg");
     );
 
+    // --- 2b. logo producentów dla GUI ---------------------------------------
+    // assets/logos/*.png — POZA licencją GPL-3.0 (znaki towarowe właścicieli,
+    // pochodzenie w assets/logos/SOURCES.md). Osadzane wyłącznie w GUI.
+    const logo_names = [_][]const u8{
+        "amd",                "amd-ryzen",          "amd-ryzen-threadripper", "amd-epyc",
+        "amd-radeon",         "intel",              "intel-core",             "intel-core-i3",
+        "intel-core-i5",      "intel-core-i7",      "intel-core-i9",          "intel-core-ultra-3",
+        "intel-core-ultra-5", "intel-core-ultra-7", "intel-core-ultra-9",     "intel-xeon",
+        "nvidia",             "nvidia-geforce",
+    };
+    const logos_files = b.addWriteFiles();
+    var logos_src: std.ArrayList(u8) = .empty;
+    logos_src.appendSlice(b.allocator,
+        \\// Plik generowany przez build.zig. Nie edytuj ręcznie.
+        \\// Logo: znaki towarowe właścicieli, użyte do identyfikacji sprzętu;
+        \\// poza licencją GPL-3.0 projektu — assets/logos/SOURCES.md.
+        \\pub const Logo = struct { name: []const u8, bytes: []const u8 };
+        \\pub const all = [_]Logo{
+        \\
+    ) catch @panic("OOM");
+    for (logo_names) |n| {
+        _ = logos_files.addCopyFile(b.path(b.fmt("assets/logos/{s}.png", .{n})), b.fmt("logo_{s}.png", .{n}));
+        logos_src.appendSlice(b.allocator, b.fmt("    .{{ .name = \"{s}\", .bytes = @embedFile(\"logo_{s}.png\") }},\n", .{ n, n })) catch @panic("OOM");
+    }
+    logos_src.appendSlice(b.allocator, "};\n") catch @panic("OOM");
+    const logos_mod = logos_files.add("logos_embedded.zig", logos_src.items);
+
     // --- 3. CLI --------------------------------------------------------------
     const cli_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -153,6 +180,7 @@ pub fn build(b: *std.Build) void {
         // to wyłącznie dane testów.
         gui_mod.addAnonymousImport("hwdb_embedded", .{ .root_source_file = hwdb_mod_path });
         gui_mod.addAnonymousImport("pciids_embedded", .{ .root_source_file = pciids_mod_path });
+        gui_mod.addAnonymousImport("logos_embedded", .{ .root_source_file = logos_mod });
 
         const gui = b.addExecutable(.{
             .name = "ferrumscope-gui",
@@ -168,6 +196,18 @@ pub fn build(b: *std.Build) void {
         gui_run_step.dependOn(&run_gui.step);
     } else {
         gui_run_step.dependOn(&b.addFail("ferrumscope-gui istnieje tylko dla Windows").step);
+    }
+
+    // --- 3c. narzędzie testowe GUI: wybór zakładki przez UI Automation ------
+    // Budowane tylko na żądanie (`zig build uia-tool`), nie wchodzi do `install`.
+    const uia_step = b.step("uia-tool", "Zbuduj uia-select-tab (zrzuty ekranu GUI przez UI Automation)");
+    if (target.result.os.tag == .windows) {
+        const uia_exe = b.addExecutable(.{ .name = "uia-select-tab", .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/uia_select_tab.zig"),
+            .target = target,
+            .optimize = optimize,
+        }) });
+        uia_step.dependOn(&b.addInstallArtifact(uia_exe, .{}).step);
     }
 
     // --- 4. testy ------------------------------------------------------------
@@ -186,6 +226,7 @@ pub fn build(b: *std.Build) void {
     lib_tests.root_module.addAnonymousImport("hwdb_embedded", .{ .root_source_file = hwdb_mod_path });
     lib_tests.root_module.addAnonymousImport("fixtures_embedded", .{ .root_source_file = fixtures_mod });
     lib_tests.root_module.addAnonymousImport("pciids_embedded", .{ .root_source_file = pciids_mod_path });
+    lib_tests.root_module.addAnonymousImport("logos_embedded", .{ .root_source_file = logos_mod });
     const run_lib_tests = b.addRunArtifact(lib_tests);
     test_step.dependOn(&run_lib_tests.step);
 

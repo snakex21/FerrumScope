@@ -38,6 +38,8 @@ pub const CpuInput = struct {
     /// Opis źródła danych (np. „CPUID na żywo” albo ścieżka pliku replay).
     origin: []const u8 = "CPUID na żywo",
     live: ?LiveCpu = null,
+    /// Zegar zewnętrzny (magistrali) z SMBIOS typ 4, offset 12h. `null` = brak.
+    bus_mhz: ?u32 = null,
 };
 
 fn kb(bytes: u64) u64 {
@@ -155,6 +157,13 @@ pub fn build(arena: std.mem.Allocator, in: CpuInput) report.Page {
         });
     }
     if (info.variant) |v| b.add(.{ .label = "Wariant", .value = v, .source = srcLabel(info.variant_source), .confidence = confOf(info.variant_source) });
+    b.add(.{ .label = "Technologia", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "proces technologiczny: brak w HWDB (nie zgadujemy z nazwy)" });
+    const sig = info.signature;
+    b.add(.{ .label = "Rodzina", .value = b.fmt("{X}", .{sig.familyField()}), .raw = b.fmt("0x{X}", .{sig.familyField()}), .source = "CPUID.1 EAX[11:8]" });
+    b.add(.{ .label = "Model", .value = b.fmt("{X}", .{sig.modelField()}), .raw = b.fmt("0x{X}", .{sig.modelField()}), .source = "CPUID.1 EAX[7:4]" });
+    b.add(.{ .label = "Stepping", .value = b.fmt("{X}", .{info.stepping}), .source = "CPUID.1 EAX[3:0]" });
+    b.add(.{ .label = "Rodzina rozsz.", .value = b.fmt("{X}", .{info.display_family}), .raw = b.fmt("ext_family=0x{X}", .{sig.extFamily()}), .source = "CPUID.1 EAX[27:20] + [11:8] (display family)" });
+    b.add(.{ .label = "Model rozsz.", .value = b.fmt("{X}", .{info.display_model}), .raw = b.fmt("ext_model=0x{X}", .{sig.extModel()}), .source = "CPUID.1 EAX[19:16]:[7:4] (display model)" });
     b.add(.{
         .label = "Family / Model / Stepping",
         .value = b.fmt("{X} / {X} / {X}", .{ info.display_family, info.display_model, info.stepping }),
@@ -176,7 +185,17 @@ pub fn build(arena: std.mem.Allocator, in: CpuInput) report.Page {
             });
             if (lv.est_max_mhz) |mx| b.add(.{ .label = "Najszybszy rdzeń", .value = b.fmt("{d:.0} MHz", .{mx}), .state = .estimate, .confidence = .medium, .source = "jw., maksimum po procesorach logicznych" });
         } else {
-            b.add(.{ .label = "Zegar rdzeni", .value = "—", .state = .unavailable, .confidence = .unknown, .source = if (lv.pdh_ok) "licznik PDH bez danych (pierwsza próbka)" else "licznik PDH % Processor Performance niedostępny" });
+            b.add(.{ .label = "Zegar rdzeni (średnio)", .value = "—", .state = .unavailable, .confidence = .unknown, .source = if (lv.pdh_ok) "licznik PDH bez danych (pierwsza próbka)" else "licznik PDH % Processor Performance niedostępny" });
+        }
+        if (in.bus_mhz) |bus| {
+            b.add(.{ .label = "Zegar magistrali", .value = b.fmt("{d} MHz", .{bus}), .source = "SMBIOS typ 4, offset 12h (External Clock)", .confidence = .medium, .note = "wartość firmware, nie pomiar" });
+            if (lv.est_avg_mhz) |avg| {
+                const mul = avg / @as(f32, @floatFromInt(@max(bus, 1)));
+                b.add(.{ .label = "Mnożnik", .value = b.fmt("x {d:.1}", .{mul}), .state = .estimate, .confidence = .low, .source = "zegar rdzeni (oszacowanie) / zegar magistrali (SMBIOS)" });
+            } else b.add(.{ .label = "Mnożnik", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "brak oszacowania zegara rdzeni" });
+        } else {
+            b.add(.{ .label = "Zegar magistrali", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "brak SMBIOS typ 4 External Clock" });
+            b.add(.{ .label = "Mnożnik", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "brak zegara magistrali" });
         }
         if (lv.base_mhz) |m| b.add(.{ .label = "Zegar bazowy", .value = b.fmt("{d} MHz", .{m}), .source = "CallNtPowerInformation(ProcessorInformation).MaxMhz (ACPI)", .confidence = .medium });
         if (lv.reported_mhz) |m| b.add(.{ .label = "Zegar zgłaszany przez system", .value = b.fmt("{d} MHz", .{m}), .source = "CallNtPowerInformation(ProcessorInformation).CurrentMhz", .confidence = .low, .note = "na nowszych Windows zwykle równy bazowemu" });
@@ -238,8 +257,13 @@ pub fn build(arena: std.mem.Allocator, in: CpuInput) report.Page {
             .value = cacheLabel(&b, c, inst.n),
             .confidence = if (inst.derived) .medium else .high,
             .note = if (inst.derived) "liczba instancji wyprowadzona z topologii (cache prywatny rdzenia × liczba rdzeni)" else "",
-            .raw = b.fmt("{d} B/instancję, linia {d} B, zestawów {d}", .{ c.size_bytes, c.line_size, c.sets }),
-            .source = if (c.associativity > 0) b.fmt("CPUID (liść cache), {d}-way", .{c.associativity}) else "CPUID (liść cache)",
+            .raw = b.fmt("{d} B/instancję", .{c.size_bytes}),
+            .source = "CPUID (liść cache: 4 / 0x8000001D)",
+        });
+        b.add(.{
+            .label = b.fmt("{s} — opis", .{cacheName(c)}),
+            .value = if (c.associativity > 0) b.fmt("{d}-way, linia {d} B, {d} zestawów", .{ c.associativity, c.line_size, c.sets }) else b.fmt("linia {d} B, {d} zestawów", .{ c.line_size, c.sets }),
+            .source = "CPUID (liść cache: 4 / 0x8000001D)",
         });
     }
 

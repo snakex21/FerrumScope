@@ -13,7 +13,7 @@ const catalog = @import("telemetry/catalog.zig");
 const raw = @import("core/raw.zig");
 const model = @import("core/model.zig");
 
-pub const version = "0.1.0-dev";
+pub const version = "0.2.0-dev";
 
 /// Nominalna częstotliwość używana do skalowania APERF/MPERF.
 ///
