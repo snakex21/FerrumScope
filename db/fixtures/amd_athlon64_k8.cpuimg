@@ -1,0 +1,17 @@
+# FerrumScope — obraz referencyjny: AMD Athlon 64 3200+ (K8 Hammer)
+# Family 15, Model 0x02, stepping 3. K8 nie ma leaf 4 — cache
+# opisywane są w 0x80000005/0x80000006 (Etap 2).
+# Ręcznie skonstruowany obraz CPUID (tools/gen_fixtures.py),
+# oparty na publicznych sygnaturach Intel SDM / AMD APM.
+ferrum-cpuimg 1
+arch x86_64
+max_basic 0x4
+max_extended 0x80000008
+
+leaf 0x0 sub 0x0 eax=0x00000004 ebx=0x68747541 ecx=0x444D4163 edx=0x69746E65
+leaf 0x1 sub 0x0 eax=0x00000F23 ebx=0x00010000 ecx=0x00000000 edx=0x04000000
+leaf 0x80000000 sub 0x0 eax=0x80000008 ebx=0x00000000 ecx=0x00000000 edx=0x00000000
+leaf 0x80000001 sub 0x0 eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000
+leaf 0x80000002 sub 0x0 eax=0x20444D41 ebx=0x6C687441 ecx=0x74286E6F edx=0x3620296D
+leaf 0x80000003 sub 0x0 eax=0x72502034 ebx=0x7365636F ecx=0x20726F73 edx=0x30323320
+leaf 0x80000004 sub 0x0 eax=0x00002B30 ebx=0x00000000 ecx=0x00000000 edx=0x00000000

@@ -1,0 +1,17 @@
+# FerrumScope — obraz referencyjny: Intel Core 2 Duo E6600 (Conroe)
+# Family 6, Model 0x16, stepping 9. Brak leaf 4 i 0x0B:
+# liczba rdzeni bierze się wyłącznie z CPUID.1.EBX[23:16].
+# Ręcznie skonstruowany obraz CPUID (tools/gen_fixtures.py),
+# oparty na publicznych sygnaturach Intel SDM / AMD APM.
+ferrum-cpuimg 1
+arch x86_64
+max_basic 0x4
+max_extended 0x80000008
+
+leaf 0x0 sub 0x0 eax=0x00000004 ebx=0x756E6547 ecx=0x6C65746E edx=0x49656E69
+leaf 0x1 sub 0x0 eax=0x00010669 ebx=0x00020000 ecx=0x00000201 edx=0x04000000
+leaf 0x80000000 sub 0x0 eax=0x80000008 ebx=0x00000000 ecx=0x00000000 edx=0x00000000
+leaf 0x80000001 sub 0x0 eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000
+leaf 0x80000002 sub 0x0 eax=0x65746E49 ebx=0x2952286C ecx=0x726F4320 edx=0x4D542865
+leaf 0x80000003 sub 0x0 eax=0x44203229 ebx=0x43206F75 ecx=0x20205550 edx=0x45202020
+leaf 0x80000004 sub 0x0 eax=0x30303636 ebx=0x20402020 ecx=0x30342E32 edx=0x007A4847

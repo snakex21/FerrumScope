@@ -1,0 +1,380 @@
+# FerrumScope — hardware database: Intel
+#
+# UWAGA: to NIE jest wpis na każdy SKU. Nazwy marketingowe ("Intel Core i7-13700K")
+# pochodzą z brand stringu CPUID 0x80000002..4, który procesor sam zwraca.
+# Baza niesie to, czego CPUID **nie** mówi: mikroarchitekturę, kodową nazwę
+# pokolenia i dziwactwa wymagające innego traktowania przez dekoder.
+#
+# Pola obowiązkowe (brak = błąd kompilacji):
+#   vendor, ext_family, family_field, model_min, model_max, uarch,
+#   source, confidence;  source_url gdy confidence != "low"
+#
+# Źródła:
+#   Intel SDM, "CPUID.01H:EAX" oraz tabela family/model (rozd. 2.1)
+#   Intel ARK (ark.intel.com) dla kodowych nazw pokoleń
+#
+# Numeracja: dla Intela ext_family = 0, family_field = 6; reguła SDM
+# "display_model" używa rozszerzonego modelu (ext_model << 4 | model).
+
+[meta]
+schema = "ferrum.hwdb.cpu.v1"
+source = "intel-sdm + intel-ark"
+source_rev = "2026-09-29"
+
+# --- Starsze generacje ------------------------------------------------------
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x0
+model_min = 0x02
+model_max = 0x02
+stepping_min = 0
+stepping_max = 0xFF
+uarch = "P6"
+codename = "P6"
+source = "intel-sdm"
+source_url = "https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html"
+confidence = "high"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x5
+model_min = 0x03
+model_max = 0x03
+uarch = "P5"
+codename = "Pentium (P5)"
+source = "intel-sdm"
+source_url = "https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html"
+confidence = "high"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x0F
+model_min = 0x00
+model_max = 0x01
+uarch = "P6"
+codename = "Pentium Pro"
+source = "intel-sdm"
+source_url = "https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html"
+confidence = "high"
+
+# --- Core 2 -----------------------------------------------------------------
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x0F
+model_max = 0x0F
+uarch = "Core 2"
+codename = "Merom/Conroe"
+source = "intel-sdm"
+source_url = "https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html"
+confidence = "high"
+# Core 2 nie ma Hyper-Threadingu. Bez tej wiedzy szerokosc SMT pozostalaby
+# nieznana, a `logical / 1` dalby "4 rdzenie" na czterech watkach.
+quirk_smt_threads = 1
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x16
+model_max = 0x16
+uarch = "Core 2"
+codename = "Conroe"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+# Core 2 nie ma Hyper-Threadingu. Ten sam powód co w wpisie Model 0x0F:
+# wlasciwosc rodziny, dzieki czemu `logical / 1` nie jest zgadywaniem.
+quirk_smt_threads = 1
+confidence = "high"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x17
+model_max = 0x17
+uarch = "Core 2"
+codename = "Penryn"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+# --- Nehalem / Westmere / Sandy Bridge --------------------------------------
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x1A
+model_max = 0x1A
+uarch = "Core (Nehalem)"
+codename = "Bloomfield/Nehalem"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "medium"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x25
+model_max = 0x25
+uarch = "Core (Westmere)"
+codename = "Clarkdale/Arrandale"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "medium"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x2A
+model_max = 0x2A
+uarch = "Sandy Bridge"
+codename = "Sandy Bridge"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+quirk_cache_leaf_ext = false
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x2D
+model_max = 0x2D
+uarch = "Sandy Bridge-E"
+codename = "Sandy Bridge-E"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "medium"
+
+# --- Ivy Bridge / Haswell / Broadwell ---------------------------------------
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x3A
+model_max = 0x3A
+uarch = "Ivy Bridge"
+codename = "Ivy Bridge"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x3C
+model_max = 0x3C
+uarch = "Haswell"
+codename = "Haswell"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x3F
+model_max = 0x3F
+uarch = "Haswell-E"
+codename = "Haswell-E"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "medium"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x3D
+model_max = 0x3D
+uarch = "Broadwell"
+codename = "Broadwell"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+# --- Skylake ----------------------------------------------------------------
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x4E
+model_max = 0x4E
+uarch = "Skylake"
+codename = "Skylake (client)"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x5E
+model_max = 0x5E
+uarch = "Skylake"
+codename = "Skylake (client U/H)"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x55
+model_max = 0x55
+uarch = "Skylake-SP"
+codename = "Skylake-X / Cascade Lake"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+# --- Kaby Lake / Coffee Lake / Whiskey Lake ---------------------------------
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x8E
+model_max = 0x8E
+uarch = "Kaby Lake / Coffee Lake"
+codename = "Kaby Lake, Coffee Lake, Whiskey Lake, Comet Lake"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x9E
+model_max = 0x9E
+uarch = "Kaby Lake / Coffee Lake"
+codename = "Kaby Lake / Coffee Lake (U/H)"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+# --- Ice Lake / Tiger Lake --------------------------------------------------
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x7D
+model_max = 0x7E
+uarch = "Ice Lake"
+codename = "Ice Lake (client/server)"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x8C
+model_max = 0x8D
+uarch = "Tiger Lake"
+codename = "Tiger Lake"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+# --- Alder Lake / Raptor Lake / Emerald Rapids ------------------------------
+#
+# Alder Lake to CPU hybrydowy: część rdzeni fizycznych ma SMT wyłączone.
+# Dzielenie threads / smt_width dałoby fałszywą liczbę rdzeni, więc dekoder
+# dostaje quirk i **nie podaje** cores_physical zamiast podawać błędnie.
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x97
+model_max = 0x9A
+uarch = "Alder Lake"
+codename = "Alder Lake"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+quirk_hybrid_cores = true
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0xB7
+model_max = 0xBA
+uarch = "Raptor Lake"
+codename = "Raptor Lake"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+quirk_hybrid_cores = true
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0xBF
+model_max = 0xBF
+uarch = "Raptor Lake"
+codename = "Raptor Lake-S"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "medium"
+quirk_hybrid_cores = true
+
+# --- Serwer: Sapphire Rapids / Emerald Rapids / Granite Rapids --------------
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0x8F
+model_max = 0x8F
+uarch = "Sapphire Rapids"
+codename = "Sapphire Rapids"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0xCF
+model_max = 0xCF
+uarch = "Emerald Rapids"
+codename = "Emerald Rapids"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "high"
+
+[[entry]]
+vendor = "intel"
+ext_family = 0x0
+family_field = 0x6
+model_min = 0xAD
+model_max = 0xAD
+uarch = "Granite Rapids"
+codename = "Granite Rapids"
+source = "intel-ark"
+source_url = "https://ark.intel.com"
+confidence = "medium"

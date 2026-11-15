@@ -1,0 +1,58 @@
+;
+; FerrumScope — minimalny sterownik odczytu MSR
+; =============================================
+;
+; ZAKRES: read-only. Brak MSR write, brak dostępu do pamięci, brak MMIO,
+; brak port I/O. Szczegóły w driver/ferrum_msr.c i docs/SECURITY-MODEL.md.
+;
+; UWAGA: plik **nie został przetestowany zainstalowaniem**. Pierwszy test
+; jądra idzie przez `sc create` (bez INF). Patrz docs/08b-windows-msr-backend.md.
+;
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = System
+ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+CatalogFile = FerrumScopeMsr.cat
+DriverVer   = 09/29/2026,1.0.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir          = 12
+FerrumMsr.DriverFiles  = 12
+
+[DefaultInstall.NTamd64]
+OptionDesc  = %ServiceDescription%
+CopyFiles   = FerrumMsr.DriverFiles
+
+[DefaultInstall.NTamd64.Services]
+AddService  = FerrumScopeMsr,%ServiceName%, FerrumMsr.Service
+
+[DefaultUninstall.NTamd64]
+DelFiles    = FerrumMsr.DriverFiles
+LegacyUninstall = 1
+
+[FerrumMsr.Service]
+DisplayName     = %ServiceDesc%
+ServiceType     = 1               ; SERVICE_KERNEL_DRIVER
+StartType       = 3               ; SERVICE_DEMAND_START
+ErrorControl    = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary   = %12%\%DriverName%.sys
+
+[FerrumMsr.DriverFiles]
+FerrumScopeMsr.sys
+
+[SourceDisksFiles]
+FerrumScopeMsr.sys = 1,,
+
+[SourceDisksNames]
+1 = %DiskId1%,,,
+
+[Strings]
+ManufacturerName = "FerrumScope"
+ServiceName      = "FerrumScopeMsr"
+ServiceDesc      = "FerrumScope MSR reader (read-only, allowlisted registers)"
+ServiceDescription = "Read-only provider of allowlisted MSR counters for FerrumScope. Grants no memory, MMIO, port I/O or MSR write access."
+DriverName       = "FerrumScopeMsr"
+DiskId1          = "FerrumScope MSR driver installation disk"

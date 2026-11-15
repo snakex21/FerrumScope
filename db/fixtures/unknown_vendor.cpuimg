@@ -1,0 +1,15 @@
+# FerrumScope — obraz referencyjny: Nieznany producent, brak brand stringu
+# Vendor string nie pasuje do żadnej z rozpoznawanych wartości.
+# Leaf 0x80000002..4 zwracają same NUL-e. Oczekujemy, że dekoder
+# wciąż zwróci rodzinę, model i oznaczy wynik jako niepewny.
+# Ręcznie skonstruowany obraz CPUID (tools/gen_fixtures.py),
+# oparty na publicznych sygnaturach Intel SDM / AMD APM.
+ferrum-cpuimg 1
+arch x86_64
+max_basic 0x1
+max_extended 0x0
+
+leaf 0x0 sub 0x0 eax=0x00000001 ebx=0x4F637477 ecx=0x6F725465 edx=0x6D756874
+leaf 0x1 sub 0x0 eax=0x000006A1 ebx=0x00010000 ecx=0x00000000 edx=0x04000000
+leaf 0x80000000 sub 0x0 eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000
+leaf 0x80000001 sub 0x0 eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000

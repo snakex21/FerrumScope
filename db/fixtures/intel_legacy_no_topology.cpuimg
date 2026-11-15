@@ -1,0 +1,20 @@
+# FerrumScope fixture: Intel bez nowoczesnych liści topologii
+# synthetic_spec_fixture
+#
+# POCHODZENIE: dane zsyntetyzowane wg Intel SDM Vol. 2 (CPUID leaves
+# 0xB / 0x1F / 0x1A) dla: Family 6, Model 0x0F (Conroe/Core 2), max_basic = 0x10
+# NIE jest to zrzut konkretnego, kupionego procesora.
+# Zadeklarowane logical processors: 2
+# 0x0B i 0x1F są POZA zakresem -> brak pomiaru rdzeni fizycznych.
+ferrum-cpuimg 1
+arch x86_64
+max_basic 0x10
+max_extended 0x80000008
+
+leaf 0x00000000 sub 0x00 eax=0x00000010 ebx=0x756E6547 ecx=0x6C65746E edx=0x49656E69
+leaf 0x00000001 sub 0x00 eax=0x000006F2 ebx=0x00020100 ecx=0x7FBFEBFF edx=0x2FD4FBFF
+leaf 0x80000002 sub 0x00 eax=0x65746E49 ebx=0x2952286C ecx=0x726F4320 edx=0x4D542865
+leaf 0x80000003 sub 0x00 eax=0x44203229 ebx=0x43206F75 ecx=0x20205550 edx=0x45202020
+leaf 0x80000004 sub 0x00 eax=0x30303636 ebx=0x20202020 ecx=0x20202020 edx=0x20202020
+leaf 0x80000002 sub 0x00 eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000
+leaf 0x80000008 sub 0x00 eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000

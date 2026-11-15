@@ -1,0 +1,61 @@
+# --- FerrumScope -----------------------------------------------------------
+
+# --- Zig: cache, wyniki budowania, przypięty toolchain ---------------------
+.zig-cache/
+zig-cache/
+zig-out/
+/build/
+# Toolchain pobierany przez tools/fetch_zig.py (z weryfikacją SHA-256).
+# Sam skrypt jest śledzony; rozpakowany kompilator nie.
+/tools/zig/
+
+# --- Zastrzeżone binaria referencyjne (CPU-Z / GPU-Z) — nigdy w repo -------
+/do referencji/
+# Wyniki wyprowadzone z binariów referencyjnych (kwarantanna, reference/README.md)
+/reference/dumps/
+# Artefakty analizy statycznej (rozpakowane kopie, UPX)
+/tools/refext/_probe/
+/tools/refext/bin/
+
+# --- Raporty sond CPU-Z: zawierają numery seryjne / UUID maszyny -----------
+.cpuz_probe.txt.txt
+probe1.txt.txt
+*.cpuz*.txt
+*probe*.txt
+
+# --- Raporty FerrumScope wygenerowane lokalnie (mogą zawierać seriale) -----
+ferrumscope-report*.txt
+ferrumscope-report*.html
+ferrumscope-report*.json
+
+# --- Sterownik: wyniki kompilacji, podpisów i paczki ------------------------
+/driver/build/
+/driver/package/
+*.sys
+*.cat
+*.pdb
+
+# --- PCI ID: wygenerowany TOML jest odtwarzalny z pci.ids ------------------
+# (sam pci.ids JEST śledzony — z niego build kompiluje bazę PCI; licencja
+# pliku: GPL-2.0+ albo BSD-3-Clause, nagłówek zachowany w pliku)
+/db/source/pci/pci.ids.toml
+/db/source/pci/pci.ids.tmp
+
+# --- Narzędzia lokalne i śmieci ---------------------------------------------
+.supercli/
+__pycache__/
+*.pyc
+*.log
+*.log.err
+*.pid
+*.o
+*.obj
+triv.obj
+wdk_install.*
+wdk_vs_integration.pid
+x86_64-linux-gnu
+
+# --- wyniki kompilacji bazy i capture -------------------------------------
+*.hwdb.bin
+ferrum-hwdb.bin
+*.fcap

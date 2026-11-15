@@ -1,0 +1,16 @@
+.{
+    .name = .ferrumscope,
+    .version = "0.1.0-dev",
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{},
+    .fingerprint = 0x18bf1edbdd8e9d34,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "tools",
+        "db",
+        "README.md",
+        "LICENSE",
+    },
+}

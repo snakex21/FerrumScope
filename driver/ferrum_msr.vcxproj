@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FerrumScope MSR driver — projekt MSBuild dla WDK.
+
+  Używamy oficjalnej ścieżki WDK (PlatformToolset WindowsKernelModeDriver10.0)
+  zamiast ręcznego zarządzania INCLUDE/LIB. WDK ustawia właściwe ścieżki
+  nagłówków, biblioteki jądra i reguły linkowania dla sterowników trybu jądra;
+  wersja ręczna (cl + link z wpisanymi ścieżkami) nie działała poprawnie.
+
+  PlatformToolset: WindowsKernelModeDriver10.0  <- zainstalowany WDK 10.0.26100.0
+-->
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{7C1A9E42-3B55-4D6E-9F10-2A8B4C5D6E70}</ProjectGuid>
+    <TemplateGuid>{497e31cb-056b-4f31-abb8-447fd55ee5a5}</TemplateGuid>
+    <TargetVersion>Windows10</TargetVersion>
+    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <Configuration>Release</Configuration>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <RootNamespace>FerrumScopeMsr</RootNamespace>
+    <DriverType>WDM</DriverType>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Driver</ConfigurationType>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <UseDebugLibraries>false</UseDebugLibraries>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <PropertyGroup>
+    <TargetName>FerrumScopeMsr</TargetName>
+    <!-- Symbole debug zachowujemy: przy pierwszym zrzucie stosu w jądrze
+         bez PDB mamy tylko adresy bez symboli, czyli nic użytecznego. -->
+    <GenerateDebugInformation>true</GenerateDebugInformation>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <!-- Level4 celowo. Przy sterowniku jądra warning C28251/C28252
+           (sprawdzanie adnotacji) i ostrzeżenia o IRQL są wartościowe,
+           a nie szumem. -->
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <PreprocessorDefinitions>_KERNEL_MODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ExceptionHandling>false</ExceptionHandling>
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
+      <CallingConvention>StdCall</CallingConvention>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>hal.lib;wmilib.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <ClCompile Include="ferrum_msr.c" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Inf Include="ferrum_msr.inf" />
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+
+</Project>

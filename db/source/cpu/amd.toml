@@ -1,0 +1,458 @@
+# FerrumScope — hardware database: AMD
+#
+# Jak w intel.toml: to NIE jest wpis na każdy SKU. Nazwy marketingowe pochodzą
+# z brand stringu CPUID. Baza niesie mikroarchitekturę, kodową nazwę i quirks.
+#
+# AMD używa numeracji extended intensywniej niż Intel:
+#   Zen 1  = Family 17h  -> ext_family = 0x08, family_field = 0x0F
+#   Zen 3+ = Family 19h  -> ext_family = 0x0A, family_field = 0x0F
+# Reguła SDM/APM: display_model = (ext_model << 4) | model dla rodziny 0x0F.
+#
+# Źródła:
+#   AMD64 Architecture Programmer's Manual (APM), rozdz. "CPUID Fn0000_0001"
+#   AMD "Family 19h Model ..h" identification tables (publiczne)
+#   AMD product pages dla kodowych nazw (Vermeer, Raphael, Genoa, Turin)
+
+[meta]
+schema = "ferrum.hwdb.cpu.v1"
+source = "amd-apm + amd-pub"
+source_rev = "2026-09-29"
+
+# --- K8 / K10 / K11 ---------------------------------------------------------
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x0
+family_field = 0x0F
+model_min = 0x01
+model_max = 0x0F
+uarch = "K8"
+codename = "Hammer (K8)"
+source = "amd-apm"
+source_url = "https://www.amd.com/en/search/documentation/hub.html"
+confidence = "high"
+quirk_extended_model_rule = true
+# K8 nie ma SMT. Wlasciwosc rodziny, a nie pomiar tej maszyny: bez niej
+# szerokosc SMT pozostalaby nieznana, a `logical / 1` byloby zgadywaniem.
+quirk_smt_threads = 1
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x0
+family_field = 0x0F
+model_min = 0x10
+model_max = 0x1F
+uarch = "K10"
+codename = "Phenom"
+source = "amd-apm"
+source_url = "https://www.amd.com/en/search/documentation/hub.html"
+confidence = "medium"
+quirk_extended_model_rule = true
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x1
+family_field = 0x0F
+model_min = 0x10
+model_max = 0x1F
+uarch = "K11"
+codename = "Llano"
+source = "amd-apm"
+source_url = "https://www.amd.com/en/search/documentation/hub.html"
+confidence = "medium"
+quirk_extended_model_rule = true
+
+# --- Bulldozer --------------------------------------------------------------
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x1
+family_field = 0x0F
+model_min = 0x30
+model_max = 0x3F
+uarch = "Bulldozer / Piledriver / Steamroller / Excavator"
+codename = "Bobcat, V Bulldozer, Trinity, Richland"
+source = "amd-apm"
+source_url = "https://www.amd.com/en/search/documentation/hub.html"
+confidence = "medium"
+quirk_extended_model_rule = true
+
+# --- Zen 1 (Family 17h) ----------------------------------------------------
+#
+# Cache opisuje leaf 0x8000001D, a nie leaf 4 — stąd quirk_cache_leaf_ext.
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x08
+family_field = 0x0F
+model_min = 0x00
+model_max = 0x0F
+uarch = "Zen 1"
+codename = "Naples (EPYC 1st gen)"
+source = "amd-apm"
+source_url = "https://www.amd.com/en/search/documentation/hub.html"
+confidence = "high"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x08
+family_field = 0x0F
+model_min = 0x10
+model_max = 0x1F
+uarch = "Zen 1"
+codename = "Summit Ridge / Picasso"
+source = "amd-pub"
+source_url = "https://www.amd.com/en/products/processors/ryzen"
+confidence = "medium"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+# --- Zen 2 (Family 17h) ----------------------------------------------------
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x08
+family_field = 0x0F
+model_min = 0x30
+model_max = 0x3F
+uarch = "Zen 2"
+codename = "Rome (EPYC 2nd gen)"
+source = "amd-apm"
+source_url = "https://www.amd.com/en/search/documentation/hub.html"
+confidence = "high"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x08
+family_field = 0x0F
+model_min = 0x40
+model_max = 0x4F
+uarch = "Zen 2"
+codename = "Matisse (Ryzen 3000)"
+source = "amd-pub"
+source_url = "https://www.amd.com/en/products/processors/ryzen"
+confidence = "high"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x08
+family_field = 0x0F
+model_min = 0x50
+model_max = 0x6F
+uarch = "Zen 2"
+codename = "Renoir / Lucienne / Dali / Van Gogh"
+source = "amd-pub"
+source_url = "https://www.amd.com/en/products/processors/ryzen"
+confidence = "medium"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x08
+family_field = 0x0F
+model_min = 0x70
+model_max = 0x9F
+uarch = "Zen 2"
+codename = "Rome (EPYC 2nd gen, wyższe modele)"
+source = "amd-apm"
+source_url = "https://www.amd.com/en/search/documentation/hub.html"
+confidence = "low"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+# --- Zen 3 (Family 19h) ----------------------------------------------------
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0x00
+model_max = 0x0F
+uarch = "Zen 3"
+codename = "Milan / Cezanne (Ryzen 5000)"
+source = "amd-pub"
+source_url = "https://www.amd.com/en/products/processors/ryzen"
+confidence = "high"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+# --- Zen 4 (Family 19h) ----------------------------------------------------
+#
+# Zakresy poniżej rozłączne — kompilator odrzuci bazę, gdyby się nałożyły.
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0x10
+model_max = 0x1F
+uarch = "Zen 4"
+codename = "Raphael (Ryzen 7000)"
+source = "amd-pub"
+source_url = "https://www.amd.com/en/products/processors/ryzen"
+confidence = "high"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+# PROWENCJANCJA: podział desktop (Vermeer) vs EPYC (Milan-X) **NIE jest
+# potwierdzony**. Dokumentacja AMD, którą udało się ustalić, dotyczy Family 19h
+# Models 00h-0Fh (Zen 3 EPYC), a ten zakres to 20h-3Fh; nie znaleźliśmy tabeli
+# rozdzielającej 0x2F od 0x30. Jedyne twarde dane to zmierzona sygnatura
+# Ryzen 7 5800X3D: Model 0x21, który jest desktopowym Vermeer.
+#
+# Mimo to **nie dzielimy** wpisu na dwa. Granica, której nie potwierdziliśmy,
+# nie może decydować o tym, co widzi użytkownik: przy podziale pełna reszta
+# zakresu dostałaby `confidence = low` i obniżoną wiarygodność, a użytkownik
+# z prawdziwym Milan-X dostałby złą nazwę równie pewnie jak wcześniej.
+# Dopóki granicy nie potwierdzimy, `codename` opisuje to, co **wspólne** dla
+# całego zakresu, a rozróżnienie zostaje w źródle jako hipoteza.
+[[entry]]
+vendor = "amd"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0x20
+model_max = 0x3F
+uarch = "Zen 3"
+codename = "Vermeer / Milan-X (Zen 3, Ryzen 5000 i EPYC 7003)"
+silicon_family = "Zen 3"
+product_family = "Ryzen 5000 / EPYC 7003"
+source = "amd-apm"
+source_url = "https://www.amd.com/en/search/documentation/hub.html"
+confidence = "medium"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0x40
+model_max = 0x5F
+uarch = "Zen 4"
+codename = "Genoa (EPYC 4th gen)"
+source = "amd-pub"
+source_url = "https://www.amd.com/en/products/processors/epyc"
+confidence = "medium"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0x60
+model_max = 0x6F
+uarch = "Zen 4"
+codename = "Genoa (EPYC 4th gen)"
+source = "amd-pub"
+source_url = "https://www.amd.com/en/products/processors/epyc"
+confidence = "high"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+# --- Zen 5 (Family 19h) ----------------------------------------------------
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0x70
+model_max = 0x7F
+uarch = "Zen 5"
+codename = "Strix Point / Ryzen AI 300"
+source = "amd-pub"
+source_url = "https://www.amd.com/en/products/processors/ryzen"
+confidence = "medium"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0x80
+model_max = 0x9F
+uarch = "Zen 5"
+codename = "Turin (EPYC 5th gen, Ryzen 9000)"
+source = "amd-pub"
+source_url = "https://www.amd.com/en/products/processors/ryzen"
+confidence = "medium"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+# --- Zen 5c -----------------------------------------------------------------
+
+[[entry]]
+vendor = "amd"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0xA0
+model_max = 0xAF
+uarch = "Zen 5c"
+codename = "Turin Dense (EPYC 5th gen)"
+source = "amd-pub"
+source_url = "https://www.amd.com/en/products/processors/epyc"
+confidence = "low"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
+
+# ---------------------------------------------------------------------------
+# Fakty sygnatury: `stepping_name` i `socket_name`.
+#
+# Osobne od `[[entry]]` **z powodu**, którego nie wolno zgubić w tłumaczeniu:
+# `[[entry]]` decyduje `MatchQuality`, a `family_generic` opisuje całą rodzinę.
+# Zakres 0x20..0x3F obejmuje desktop (AM4) i serwer (SP3) w jednym wpisie, więc
+# wpisanie gniazda do `[[entry]]` wymusiłoby rozbicie tego wpisu — a to zmiana
+# semantyki dopasowania, czego świadomie nie chcemy.
+#
+# `[[fact]]` opisuje sygnaturę precyzyjnie i zostawia trafienie modelu nietknięte.
+# ---------------------------------------------------------------------------
+
+# Nazwa kodowa steppingu Vermeer. Zakres **wąski**: tylko Model 0x21 i tylko
+# stepping 2 — bo to jedyna sygnatura, którą zmierzyliśmy na realnym sprzęcie.
+#
+# `VMR-B2` to obserwacja referencyjna, a NIE dokumentacja AMD: publiczne Revision
+# Guide obejmują Modele 00h–0Fh i 10h–1Fh, a 20h–2Fh (Vermeer) nie ma. Dlatego
+# `source_type = "reference_observation"` i `confidence = "medium"`, nie `high`.
+#
+# Litera `B` jest obserwacją: cyfra to stepping z CPUID i da się ją wyprowadzić,
+# litera nie. `package_contacts` celowo **puste** — 1331 widać w CPU-Z, ale nie
+# mamy niezależnego potwierdzenia producenta, więc zostaje `unknown`.
+[[fact]]
+vendor = "amd"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0x21
+model_max = 0x21
+stepping_min = 0x02
+stepping_max = 0x02
+stepping_name = "VMR-B2"
+source_type = "reference_observation"
+source = "cpu-z-3.01.0-txt"
+source_url = "local oracle: do referencji/cpuz/cpuz_x64.exe -txt (CPU-Z 3.01.0, Core Stepping: VMR-B2)"
+confidence = "medium"
+notes = "Cyfra 2 = stepping CPUID, wyprowadzalna. Prefiks VMR i litera B = obserwacja referencyjna, nie wyprowadzane. Brak pierwotnego źródła AMD dla Models 20h-2Fh. package_contacts puste: brak potwierdzenia producenta dla 1331."
+
+# Gniazdo zmierzonego desktopowego Vermeer (Ryzen 5000 na AM4).
+#
+# Zakres wąski **celowo**: model 0x21 to desktop, a w szerokim wpisie 0x20..0x3F
+# siedzi również EPYC 7003 (Milan-X) na SP3. Gdybyśmy wpisali AM4 do `[[entry]]`
+# dla całego zakresu, pokazalibyśmy złe gniazdo każdemu EPYC.
+#
+# `source_type = "derived"`: gniazdo pochodzi z dokumentacji procesora, ale
+# **przypisanie** go do sygnatury 0x21 to nasz wniosek z pomiaru, nie cytat.
+[[fact]]
+vendor = "amd"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0x21
+model_max = 0x21
+stepping_min = 0x00
+stepping_max = 0xFF
+socket_name = "AM4"
+source_type = "derived"
+source = "amd-product-docs + measurement-5800x3d"
+source_url = "https://www.amd.com/en/products/processors/desktops/ryzen/5000-series/amd-ryzen-7-5800x3d.html"
+confidence = "medium"
+notes = "AM4 = dokumentacja Ryzen 5000 desktop; powiązanie z Model 0x21 = wniosek z pomiaru. Nie dotyczy 0x2F/0x30 (Milan-X, SP3) — tego podziału nie potwierdziliśmy."
+
+# ---------------------------------------------------------------------------
+# Reguły refinamentu z brand stringu.
+#
+# Sygnatura CPUID `5800X` i `5800X3D` jest **identyczna** (0x00A20F12 na naszym
+# sprzęcie). Różni je wyłącznie brand string, więc wariant musi być wyprowadzony
+# z brandu — ale przez **dane**, nie przez `if` rozsiany po decoderze.
+#
+# `vendor` jest obowiązkowy (walidator odrzuca `unknown`/`other`), więc wzorzec
+# „5800X3D” nigdy nie trafi w procesor innego producenta.
+# ---------------------------------------------------------------------------
+
+# Wariant 3D V-Cache. Wzorzec dopasowywany w znormalizowanym brand stringu
+# (obcięte krawędzie, scalone spacje), zakres ograniczony do AMD Zen 3 desktop.
+#
+# Reguła wzbogaca **wyłącznie** `product_name` / `variant` / `cache_variant`.
+# Nie rusza `vendor`, `family`, `model`, `stepping`, topologii ani cache
+# zmierzonego ze sprzętu — brand nie ma prawa zmienić odczytu CPUID.
+[[brand_rule]]
+vendor = "amd"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0x20
+model_max = 0x2F
+brand_pattern = "5800X3D"
+product_name = "Ryzen 7 5800X3D"
+variant = "3D V-Cache"
+cache_variant = "3D V-Cache"
+source_type = "derived"
+source = "brand-string-5800x3d"
+source_url = "CPUID brand string 0x80000002..4, zmierzony na 5800X3D"
+confidence = "high"
+notes = "Sygnatura CPUID nie rozróżnia 5800X i 5800X3D. Reguła wzbogaca tylko product_name/variant/cache_variant; vendor/family/model/stepping/topologia/cache zostają nietknięte."
+
+# --- Hygon ------------------------------------------------------------------
+# Serwerowy dostawca na bazie licencji Zen; CPUID zwraca "HygonGenuine".
+
+[[entry]]
+vendor = "hygon"
+ext_family = 0x0A
+family_field = 0x0F
+model_min = 0x00
+model_max = 0x6F
+uarch = "Zen 3 / Zen 4"
+codename = "Hygon (C86)"
+source = "hygon-pub"
+confidence = "low"
+quirk_extended_model_rule = true
+quirk_cache_leaf_ext = true
+# SMT2 jest cecha architektury rodziny Zen (1-4). Na AMD nie da sie tego
+# zmierzyc z CPUID: liść 0x8000001E opisuje biezacy watk.
+quirk_smt_threads = 2
