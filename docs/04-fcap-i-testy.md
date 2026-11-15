@@ -172,3 +172,33 @@ To jest **ta sama** luka, którą zgłosiłeś przy bazach. Rozwiązanie:
 > „Znamy 4 rzeczy, których nie umiemy" jest wartością tego formatu,
 > a nie brakiem — to jest dokładnie ta przewaga nad podejściem,
 > które wymaga znajomości każdego SKU na świecie.
+
+---
+
+## 6. Rozszerzenie: `.sysimg` (dane systemowe, 2026-11-15)
+
+Zanim powstanie binarny `.fcap`, dane spoza CPUID są zapisywane w tekstowym
+`.sysimg` — w tym samym duchu co `.cpuimg` (jedna instrukcja w linii, `#` =
+komentarz, diffowalny, możliwy do napisania ręcznie). Implementacja i opis
+składni: `src/capture/sysimg.zig`.
+
+| Instrukcja | Zawartość (zawsze **surowa**) |
+|---|---|
+| `masked yes/no`, `admin yes/no` | czy seriale zamaskowano; czy capture robiono jako administrator |
+| `*-status` | stan zbierania (`ok`, `requires_admin`, `failed`…) dla SMBIOS/PCI/GPU/dysków |
+| `smbios <hex>` | bufor `RawSMBIOSData` z `GetSystemFirmwareTable('RSMB')`, linie doklejane |
+| `pci …` | bus/dev/func, VID/DID/SUBSYS/REV, klasa, łącze PCIe, sterownik (wersja, data, dostawca), opis |
+| `gpu …` | `DXGI_ADAPTER_DESC1`: ID, pamięć, flaga software, nazwa |
+| `disk N size/rot/health/desc/nvme/smart/thr` | rozmiar, HDD/SSD, stan zdrowia, `STORAGE_DEVICE_DESCRIPTOR`, log NVMe 02h, strony ATA SMART |
+
+Zasady:
+
+* replay przechodzi przez **te same** parsery (`smbios.zig`, `pciids.zig`,
+  `storage_parse.zig`) i te same strony raportu co odczyt na żywo;
+* `ferrumscope capture-sys` domyślnie **maskuje** numery seryjne (SMBIOS typy
+  1/2/3/4/17 i UUID; numer seryjny w deskryptorze dysku) bez zmiany offsetów;
+* nieznane instrukcje są pomijane (zgodność w przód), uszkodzone linie dają błąd.
+
+Złoty plik: `db/fixtures/sys/asrock_b550_5800x3d_rx7900xtx.sysimg` (ASRock B550
+Taichi, Ryzen 7 5800X3D, RX 7900 XTX, 10 dysków SATA/NVMe/USB; seriale
+zamaskowane) — testy `sysimg replay: …` w `src/tests.zig`.
