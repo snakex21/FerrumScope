@@ -33,8 +33,78 @@ const fake = ferrum.telemetry.fake;
 const win_msr = ferrum.telemetry.windows_msr;
 
 const present = @import("present.zig");
+const i18n = @import("i18n/i18n.zig");
+const i18n_system = @import("i18n/system.zig");
+const settings = @import("settings.zig");
 
 const version = present.version;
+
+/// Katalogi tłumaczeń osadzone w programie przez build.zig.
+const locale_sources = i18n.embeddedSources(@import("locales_embedded"));
+
+/// Skąd pochodzi bieżący język interfejsu (pokazuje to `ferrumscope lang`).
+const LangOrigin = enum { flag, settings, system };
+var lang_origin: LangOrigin = .system;
+
+/// Pamięć na teksty składane z parametrów (`i18n.tf` / `i18n.tp`). Proces CLI
+/// żyje krótko, więc zwalniamy wszystko naraz przy wyjściu; `--watch` czyści
+/// ją co klatkę, żeby nie rosła bez końca.
+var tr_arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+
+fn ta() std.mem.Allocator {
+    return tr_arena_state.allocator();
+}
+
+/// Uzupełnia tekst spacjami do `width` kolumn (liczonych w znakach Unicode,
+/// nie bajtach — tłumaczenia mają litery wielobajtowe). Zawsze zostawia co
+/// najmniej jedną spację, żeby długie tłumaczenie nie skleiło się z wartością.
+fn padCols(buf: []u8, s: []const u8, width: usize) []const u8 {
+    const n = @min(s.len, buf.len);
+    @memcpy(buf[0..n], s[0..n]);
+    const cols = std.unicode.utf8CountCodepoints(s) catch s.len;
+    const target = @max(width, cols + 1);
+    var i = n;
+    var c = cols;
+    while (c < target and i < buf.len) : ({
+        i += 1;
+        c += 1;
+    }) buf[i] = ' ';
+    return buf[0..i];
+}
+
+/// Wiersz `  Etykieta    : wartość` w opisie CPU (etykieta już przetłumaczona).
+fn row(w: *std.Io.Writer, label: []const u8, comptime fmt: []const u8, args: anytype) !void {
+    var buf: [128]u8 = undefined;
+    try w.print("  {s}: ", .{padCols(&buf, label, 12)});
+    try w.print(fmt ++ "\n", args);
+}
+
+/// Komunikat błędu `ferrumscope: …` na stderr (tekst już przetłumaczony).
+fn fail(msg: []const u8) !void {
+    try errw().print("ferrumscope: {s}\n", .{msg});
+}
+
+/// Lista obsługiwanych kodów języków, rozdzielona przecinkami.
+fn codesList() []const u8 {
+    var list: std.ArrayList(u8) = .empty;
+    for (i18n.locales, 0..) |c, k| {
+        if (k > 0) list.appendSlice(ta(), ", ") catch {};
+        list.appendSlice(ta(), c) catch {};
+    }
+    return list.items;
+}
+
+fn isAuto(code: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(std.mem.trim(u8, code, " \t"), "auto");
+}
+
+/// Czy tag języka da się sensownie odwzorować (`normalizeCode` zamienia
+/// nieznane tagi na `en` po cichu — tu chcemy to wykryć i ostrzec).
+fn knownTag(tag: []const u8) bool {
+    if (!std.mem.eql(u8, i18n.normalizeCode(tag), "en")) return true;
+    const dash = std.mem.indexOfAny(u8, tag, "-_") orelse tag.len;
+    return std.ascii.eqlIgnoreCase(tag[0..dash], "en");
+}
 
 var stdout_buf: [16 * 1024]u8 = undefined;
 var stderr_buf: [4 * 1024]u8 = undefined;
@@ -63,78 +133,81 @@ fn errw() *std.Io.Writer {
     return &stderr_w.interface;
 }
 
-// Literały `\\` w Zig to literały wieloliniowe — każda linia zawiera
-// znak nowej linii na końcu. Kontynuacja `"\` z C nie istnieje w Zig.
-const Usage = "ferrumscope " ++ version ++ " - identyfikacja i diagnostyka sprzętu\n" ++
-    \\
-    \\Użycie:
-    \\  ferrumscope cpu                 opis procesora
-    \\  ferrumscope cpu --json          wynik w JSON
-    \\  ferrumscope cpu --raw           surowe liście CPUID
-    \\  ferrumscope explain cpu         skąd wzięliśmy każde pole
-    \\  ferrumscope replay <plik>       uruchom pipeline na pliku capture (.cpuimg)
-    \\  ferrumscope replay <plik> --json
-    \\  ferrumscope compare-captures <a> <b>  porownaj dwa pliki capture
-    \\  ferrumscope hwdb                statystyki wbudowanej bazy
-    \\  ferrumscope sensors               stan czujnikow (bez sterownika: 'unavailable')
-    \\  ferrumscope sensors --synthetic   backend testowy — wartosci NIE sa pomiarem
-    \\  ferrumscope sensors --replay <f>  odtworz z pliku telemetry
-    \\  ferrumscope sensors --watch       przebieg klatka po klatce
-    \\  ferrumscope sensors --bench       koszt cyklu pollingu (fake/replay)
-    \\  ferrumscope sensors --json        wynik w JSON
-    \\  ferrumscope capture <plik>     zapisz surowy obraz CPUID do pliku .cpuimg
-    \\
-    \\Dane systemowe (bez sterownika):
-    \\  ferrumscope board | memory | gpu | storage | sensors-all
-    \\                                  jedna strona raportu (płyta, pamięć, grafika, dyski, czujniki)
-    \\  ferrumscope report [opcje]      pełny raport
-    \\      --format=txt|html|json      format (domyślnie txt)
-    \\      -o <plik>                   zapis do pliku zamiast na stdout
-    \\      --include-serials           pokaż numery seryjne (domyślnie maskowane)
-    \\      --no-disks                  pomiń odczyt dysków (SMART)
-    \\      --sys-replay <f.sysimg>     dane systemowe z pliku capture
-    \\      --cpu-replay <f.cpuimg>     CPU z pliku capture
-    \\  ferrumscope capture-sys <plik.sysimg> [--include-serials]
-    \\                                  zapisz surowe SMBIOS/PCI/GPU/dyski (seriale maskowane)
-    \\  ferrumscope update --check      sprawdź aktualizację (kod 0 aktualna, 10 dostępna, 1 błąd)
-    \\  ferrumscope update --apply [--yes]  pobierz, zweryfikuj (SHA-256) i zainstaluj
-    \\  ferrumscope update --rollback   przywróć poprzednią wersję (*.old)
-    \\  ferrumscope update --set-auto on|off  sprawdzanie aktualizacji przy starcie GUI
-    \\  ferrumscope version             wersja
-    \\
-;
+/// Pomoc. Każdy blok to osobny identyfikator katalogu (nazwy poleceń i flag
+/// zostają w tekście bez zmian — tłumacz przekłada tylko opisy).
+fn writeUsage(w: *std.Io.Writer) !void {
+    try w.writeAll(i18n.tf(ta(), "ferrumscope {version} - identyfikacja i diagnostyka sprzętu\n", .{ .version = version }));
+    try w.writeAll(i18n.t("\nUżycie:\n  ferrumscope cpu                 opis procesora\n  ferrumscope cpu --json          wynik w JSON\n  ferrumscope cpu --raw           surowe liście CPUID\n  ferrumscope explain cpu         skąd wzięliśmy każde pole\n  ferrumscope replay <plik>       uruchom pipeline na pliku capture (.cpuimg)\n  ferrumscope replay <plik> --json\n  ferrumscope compare-captures <a> <b>  porownaj dwa pliki capture\n  ferrumscope hwdb                statystyki wbudowanej bazy\n  ferrumscope sensors               stan czujnikow (bez sterownika: 'unavailable')\n  ferrumscope sensors --synthetic   backend testowy — wartosci NIE sa pomiarem\n  ferrumscope sensors --replay <f>  odtworz z pliku telemetry\n  ferrumscope sensors --watch       przebieg klatka po klatce\n  ferrumscope sensors --bench       koszt cyklu pollingu (fake/replay)\n  ferrumscope sensors --json        wynik w JSON\n  ferrumscope capture <plik>     zapisz surowy obraz CPUID do pliku .cpuimg\n"));
+    try w.writeAll(i18n.t("\nDane systemowe (bez sterownika):\n  ferrumscope board | memory | gpu | storage | sensors-all\n                                  jedna strona raportu (płyta, pamięć, grafika, dyski, czujniki)\n  ferrumscope report [opcje]      pełny raport\n      --format=txt|html|json      format (domyślnie txt)\n      -o <plik>                   zapis do pliku zamiast na stdout\n      --include-serials           pokaż numery seryjne (domyślnie maskowane)\n      --no-disks                  pomiń odczyt dysków (SMART)\n      --sys-replay <f.sysimg>     dane systemowe z pliku capture\n      --cpu-replay <f.cpuimg>     CPU z pliku capture\n  ferrumscope capture-sys <plik.sysimg> [--include-serials]\n                                  zapisz surowe SMBIOS/PCI/GPU/dyski (seriale maskowane)\n  ferrumscope update --check      sprawdź aktualizację (kod 0 aktualna, 10 dostępna, 1 błąd)\n  ferrumscope update --apply [--yes]  pobierz, zweryfikuj (SHA-256) i zainstaluj\n  ferrumscope update --rollback   przywróć poprzednią wersję (*.old)\n  ferrumscope update --set-auto on|off  sprawdzanie aktualizacji przy starcie GUI\n  ferrumscope version             wersja\n"));
+    try w.writeAll(i18n.t("\nJęzyk interfejsu:\n  ferrumscope lang                bieżący język i lista dostępnych\n  ferrumscope lang <kod>          zapisz język w data\\settings.ini (auto = język systemu)\n  --lang=<kod>                    język tylko dla tego uruchomienia (w dowolnym miejscu wiersza poleceń)\n"));
+}
 
 pub fn main() !u8 {
     defer {
         out().flush() catch {};
         errw().flush() catch {};
     }
+    defer tr_arena_state.deinit();
     // `GeneralPurposeAllocator.allocator()` przyjmuje `*Self`, więc `gpa`
     // musi być zmienną, nie stałą.
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
-    const argv = try std.process.argsAlloc(alloc);
-    defer std.process.argsFree(alloc, argv);
+    const argv_all = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, argv_all);
+
+    // Globalna flaga `--lang=<kod>` może stać w dowolnym miejscu; polecenia
+    // jej nie widzą (inaczej każde zgłosiłoby „nieznaną opcję”).
+    const argv_buf = try alloc.alloc([:0]u8, argv_all.len);
+    defer alloc.free(argv_buf);
+    var argc: usize = 0;
+    var lang_flag: []const u8 = "";
+    for (argv_all, 0..) |a, k| {
+        if (k > 0 and std.mem.startsWith(u8, a, "--lang=")) {
+            lang_flag = std.mem.trim(u8, a["--lang=".len..], " \t");
+            continue;
+        }
+        argv_buf[argc] = a;
+        argc += 1;
+    }
+    const argv = argv_buf[0..argc];
+
+    // Język: flaga → `language` w data\settings.ini → język Windows → en.
+    i18n.setSources(&locale_sources);
+    const cfg = settings.load();
+    const cfg_lang = std.mem.trim(u8, cfg.language, " \t");
+    const explicit = if (lang_flag.len > 0) lang_flag else cfg_lang;
+    lang_origin = if (lang_flag.len > 0)
+        (if (isAuto(lang_flag)) .system else .flag)
+    else if (cfg_lang.len > 0 and !isAuto(cfg_lang)) .settings else .system;
+    i18n.setLocale(i18n_system.resolve(explicit));
+    if (lang_origin == .flag and !knownTag(lang_flag)) {
+        try fail(i18n.tf(ta(), "nieznany język '{code}' — używam {used}; dostępne: {codes}", .{
+            .code = lang_flag,
+            .used = i18n.locale(),
+            .codes = codesList(),
+        }));
+    }
 
     if (argv.len < 2) {
-        try out().writeAll(Usage);
+        try writeUsage(out());
         return 0;
     }
 
     const cmd = argv[1];
     if (std.mem.eql(u8, cmd, "-h") or std.mem.eql(u8, cmd, "--help") or std.mem.eql(u8, cmd, "help")) {
-        try out().writeAll(Usage);
+        try writeUsage(out());
         return 0;
     }
     if (std.mem.eql(u8, cmd, "version")) {
         try out().print("ferrumscope {s}\n", .{version});
         return 0;
     }
+    if (std.mem.eql(u8, cmd, "lang")) return cmdLang(argv[2..]);
     if (std.mem.eql(u8, cmd, "capture")) {
         if (argv.len < 3) {
-            try errw().print("ferrumscope: brak ścieżki wyjściowej dla capture\n", .{});
+            try fail(i18n.t("brak ścieżki wyjściowej dla capture"));
             return 2;
         }
         return cmdCapture(argv[2]);
@@ -144,21 +217,21 @@ pub fn main() !u8 {
     }
     if (std.mem.eql(u8, cmd, "explain")) {
         if (argv.len < 3 or !std.mem.eql(u8, argv[2], "cpu")) {
-            try errw().print("ferrumscope: 'explain' obsługuje na razie tylko 'cpu'\n", .{});
+            try fail(i18n.t("'explain' obsługuje na razie tylko 'cpu'"));
             return 2;
         }
         return cmdCpu(.explain);
     }
     if (std.mem.eql(u8, cmd, "compare-captures")) {
         if (argv.len < 4) {
-            try errw().print("ferrumscope: 'compare-captures' wymaga dwóch plików capture\n", .{});
+            try fail(i18n.t("'compare-captures' wymaga dwóch plików capture"));
             return 2;
         }
         return cmdCompareCaptures(alloc, argv[2], argv[3]);
     }
     if (std.mem.eql(u8, cmd, "replay")) {
         if (argv.len < 3) {
-            try errw().print("ferrumscope: brak ścieżki pliku capture\n", .{});
+            try fail(i18n.t("brak ścieżki pliku capture"));
             return 2;
         }
         return cmdReplay(alloc, argv[2], argv[3..]);
@@ -176,7 +249,7 @@ pub fn main() !u8 {
             } else if (std.mem.eql(u8, a, "--explain")) {
                 mode = .explain;
             } else {
-                try errw().print("ferrumscope: nieznana opcja '{s}' dla 'cpu'\n", .{a});
+                try fail(i18n.tf(ta(), "nieznana opcja '{option}' dla '{command}'", .{ .option = a, .command = "cpu" }));
                 return 2;
             }
         }
@@ -195,9 +268,75 @@ pub fn main() !u8 {
     if (std.mem.eql(u8, cmd, "capture-sys")) return cmdCaptureSys(alloc, argv[2..]);
     if (std.mem.eql(u8, cmd, "update")) return @import("update/update.zig").cli.run(alloc, argv[2..], out(), errw());
 
-    try errw().print("ferrumscope: nieznane polecenie '{s}'\n\n", .{cmd});
-    try errw().writeAll(Usage);
+    try errw().print("ferrumscope: {s}\n\n", .{i18n.tf(ta(), "nieznane polecenie '{command}'", .{ .command = cmd })});
+    try writeUsage(errw());
     return 2;
+}
+
+// ---------------------------------------------------------------------------
+// `lang` — język interfejsu
+// ---------------------------------------------------------------------------
+
+/// `ferrumscope lang` — bieżący język i lista dostępnych;
+/// `ferrumscope lang <kod>|auto` — zapis w data\settings.ini.
+fn cmdLang(rest: [][:0]u8) !u8 {
+    const w = out();
+    var pb: [std.fs.max_path_bytes]u8 = undefined;
+    const ini = settings.path(&pb) orelse "data\\settings.ini";
+    var cb: [64]u8 = undefined;
+
+    if (rest.len == 0) {
+        const cur = i18n.locale();
+        const name = i18n.native_names[i18n.indexOf(cur) orelse 0];
+        try w.print("{s}\n", .{i18n.tf(ta(), "Język interfejsu: {code} — {name}", .{ .code = cur, .name = name })});
+        const origin = switch (lang_origin) {
+            .flag => i18n.t("parametr --lang="),
+            .settings => i18n.tf(ta(), "ustawienie w {path}", .{ .path = ini }),
+            .system => i18n.t("język systemu Windows"),
+        };
+        try w.print("{s}\n\n", .{i18n.tf(ta(), "Źródło: {origin}", .{ .origin = origin })});
+        try w.print("{s}\n", .{i18n.t("Dostępne języki:")});
+        for (i18n.locales, i18n.native_names) |c, nm| {
+            const mark: []const u8 = if (std.mem.eql(u8, c, cur)) "*" else " ";
+            try w.print("  {s} {s}{s}\n", .{ mark, padCols(&cb, c, 9), nm });
+        }
+        try w.print("\n{s}\n", .{i18n.t("Zmiana: ferrumscope lang <kod> (auto = język systemu); jednorazowo: --lang=<kod>")});
+        return 0;
+    }
+    if (rest.len > 1) {
+        try fail(i18n.t("'lang' przyjmuje jeden argument: kod języka albo auto"));
+        return 2;
+    }
+
+    const arg = std.mem.trim(u8, rest[0], " \t");
+    var s = settings.load();
+    const code: []const u8 = if (isAuto(arg)) "" else if (i18n.indexOf(arg)) |k| i18n.locales[k] else {
+        try fail(i18n.tf(ta(), "nieznany kod języka '{code}'. Dostępne: {codes}, auto", .{ .code = arg, .codes = codesList() }));
+        return 1;
+    };
+    s.language = code;
+    settings.save(s) catch |e| {
+        try fail(i18n.tf(ta(), "nie mogę zapisać '{path}': {err}", .{ .path = ini, .err = @errorName(e) }));
+        return 1;
+    };
+    // Potwierdzenie już w NOWYM języku.
+    i18n.setLocale(i18n_system.resolve(code));
+    const now = i18n.locale();
+    const now_name = i18n.native_names[i18n.indexOf(now) orelse 0];
+    if (code.len == 0) {
+        try w.print("{s}\n", .{i18n.tf(ta(), "Język: automatycznie (język systemu, teraz {code} — {name}). Zapisano w {path}.", .{
+            .code = now,
+            .name = now_name,
+            .path = ini,
+        })});
+    } else {
+        try w.print("{s}\n", .{i18n.tf(ta(), "Język interfejsu ustawiony: {code} — {name}. Zapisano w {path}.", .{
+            .code = now,
+            .name = now_name,
+            .path = ini,
+        })});
+    }
+    return 0;
 }
 
 const Mode = enum { text, json, raw, explain };
@@ -206,12 +345,12 @@ fn cmdCpu(mode: Mode) !u8 {
     const b = native.create();
     const res = probe.run(b);
     if (res.getStatus() != .ok) {
-        try errw().print("ferrumscope: nie mogę odczytać CPU ({s})\n", .{res.getStatus().toSlice()});
+        try fail(i18n.tf(ta(), "nie mogę odczytać CPU ({status})", .{ .status = res.getStatus().toSlice() }));
         return 1;
     }
     const raw_info = res.unwrap().?;
     const db = embedded.load() catch {
-        try errw().print("ferrumscope: wbudowana baza jest uszkodzona — przebuduj projekt\n", .{});
+        try fail(i18n.t("wbudowana baza jest uszkodzona — przebuduj projekt"));
         return 1;
     };
     return report(raw_info, db, mode, "native");
@@ -254,17 +393,17 @@ fn cmdSensors(alloc: std.mem.Allocator, rest: [][:0]u8) !u8 {
         } else if (std.mem.eql(u8, a, "--replay")) {
             i += 1;
             if (i >= rest.len) {
-                try errw().print("ferrumscope: --replay wymaga ścieżki pliku\n", .{});
+                try fail(i18n.t("--replay wymaga ścieżki pliku"));
                 return 2;
             }
             replay_path = rest[i];
         } else {
-            try errw().print("ferrumscope: nieznana opcja '{s}' dla 'sensors'\n", .{a});
+            try fail(i18n.tf(ta(), "nieznana opcja '{option}' dla '{command}'", .{ .option = a, .command = "sensors" }));
             return 2;
         }
     }
     if (replay_path != null and synthetic) {
-        try errw().print("ferrumscope: --replay i --synthetic wykluczają się\n", .{});
+        try fail(i18n.t("--replay i --synthetic wykluczają się"));
         return 2;
     }
     if (bench and replay_path == null and !synthetic) synthetic = true;
@@ -292,10 +431,7 @@ fn sensorsNative(alloc: std.mem.Allocator, watch: bool, json: bool, bench: bool)
         // kontra uruchom admina.
         try errw().print("ferrumscope: {s}\n", .{win_msr.openErrorDetail(e)});
         if (watch or bench) {
-            try errw().print(
-                "ferrumscope: przechodzę na dane SYNTETYCZNE (to NIE jest pomiar)\n\n",
-                .{},
-            );
+            try errw().print("ferrumscope: {s}\n\n", .{i18n.t("przechodzę na dane SYNTETYCZNE (to NIE jest pomiar)")});
             return sensorsSynthetic(alloc, watch, json, bench);
         }
         return printSensors(NoMsrBackend.create(), null, json, false);
@@ -310,13 +446,13 @@ fn sensorsNative(alloc: std.mem.Allocator, watch: bool, json: bool, bench: bool)
 /// a jest o rzędy wielkości tańszy.
 fn runBenchReal(alloc: std.mem.Allocator, api: msr.Backend) !u8 {
     const w = out();
-    try w.print("FerrumScope sensors --bench  [backend REALNY: {s}]\n", .{api.sourceName()});
-    try w.print("Tu są koszty przejść user/kernel. Dla porównania użyj --synthetic.\n\n", .{});
+    try w.print("{s}\n", .{i18n.tf(ta(), "FerrumScope sensors --bench  [backend REALNY: {source}]", .{ .source = api.sourceName() })});
+    try w.print("{s}\n\n", .{i18n.t("Tu są koszty przejść user/kernel. Dla porównania użyj --synthetic.")});
 
     const metric = catalog.find("cpu.core.effective_frequency").?;
     const cpus = api.onlineCpuCount();
-    try w.print("  CPU online: {d}\n", .{cpus});
-    try w.print("  interwał    cykli     ns/cykl     odczytów MSR/cykl\n", .{});
+    try w.print("  {s}\n", .{i18n.tf(ta(), "CPU online: {count}", .{ .count = cpus })});
+    try w.print("  {s}\n", .{i18n.t("interwał    cykli     ns/cykl     odczytów MSR/cykl")});
     try w.print("  ----------  ------   ---------   ------------------\n", .{});
 
     const intervals = [_]u64{
@@ -357,7 +493,7 @@ fn sensorsSynthetic(alloc: std.mem.Allocator, watch: bool, json: bool, bench: bo
     var be = try fake.Backend.init(alloc, .{
         .cpu_count = 1,
         .capabilities = catalog.allCapabilities(),
-        .source_name = "syntetyczny (NIE pomiar)",
+        .source_name = i18n.t("syntetyczny (NIE pomiar)"),
         .registers = &.{
             .{
                 .msr_index = msr.Msr.aperf,
@@ -378,7 +514,7 @@ fn sensorsSynthetic(alloc: std.mem.Allocator, watch: bool, json: bool, bench: bo
 /// Replay z pliku. Przyjmuje i standalone `.telemimg`, i `.cpuimg` z sekcją.
 fn sensorsReplay(alloc: std.mem.Allocator, path: []const u8, watch: bool, json: bool) !u8 {
     const text = std.fs.cwd().readFileAlloc(alloc, path, 32 * 1024 * 1024) catch |e| {
-        try errw().print("ferrumscope: nie mogę czytać '{s}': {t}\n", .{ path, e });
+        try fail(i18n.tf(ta(), "nie mogę czytać '{path}': {err}", .{ .path = path, .err = @errorName(e) }));
         return 1;
     };
     defer alloc.free(text);
@@ -389,17 +525,17 @@ fn sensorsReplay(alloc: std.mem.Allocator, path: []const u8, watch: bool, json: 
             // Stary capture sprzed Etapu 3A: brak sekcji to **nie błąd**, tylko
             // „nie ma danych". Mylilibyśmy użytkownika, gdybyśmy zgłosili
             // uszkodzony plik.
-            try errw().print("ferrumscope: '{s}' nie zawiera sekcji telemetry (stary format)\n", .{path});
+            try fail(i18n.tf(ta(), "'{path}' nie zawiera sekcji telemetry (stary format)", .{ .path = path }));
             return 1;
         };
     } else |_| {
         img = telemimg.parse(text) catch |e| {
-            try errw().print("ferrumscope: '{s}' nie jest plikiem telemetry: {t}\n", .{ path, e });
+            try fail(i18n.tf(ta(), "'{path}' nie jest plikiem telemetry: {err}", .{ .path = path, .err = @errorName(e) }));
             return 1;
         };
     }
     if (!img.hasTelemetry()) {
-        try errw().print("ferrumscope: '{s}' nie zawiera żadnych odczytów telemetry\n", .{path});
+        try fail(i18n.tf(ta(), "'{path}' nie zawiera żadnych odczytów telemetry", .{ .path = path }));
         return 1;
     }
 
@@ -423,10 +559,7 @@ fn runPolls(
 ) !u8 {
     const nominal = if (img) |i| i.nominal_hz else synthetic_nominal_hz;
     if (nominal == 0) {
-        try errw().print(
-            "ferrumscope: brak nominal_hz w pliku — efektywna częstotliwość jest nieodtwarzalna\n",
-            .{},
-        );
+        try fail(i18n.t("brak nominal_hz w pliku — efektywna częstotliwość jest nieodtwarzalna"));
         return 1;
     }
 
@@ -451,6 +584,8 @@ fn runPolls(
 
     if (watch) {
         while (true) {
+            // Teksty klatki są tymczasowe — bez czyszczenia pamięć rosłaby co klatkę.
+            _ = tr_arena_state.reset(.retain_capacity);
             if (replay) |rp| {
                 if (!rp.advanceToNextFrame()) break;
             } else if (clock) |fb| {
@@ -505,12 +640,12 @@ fn printSensors(api: msr.Backend, samples: ?[]const metrics.Sample, json: bool, 
 
 fn printSensorsHeader(w: *std.Io.Writer, api: msr.Backend) !void {
     var buf: [256]u8 = undefined;
-    try w.print("FerrumScope sensors  [źródło: {s}]\n", .{api.sourceName()});
+    try w.print("{s}\n", .{i18n.tf(ta(), "FerrumScope sensors  [źródło: {source}]", .{ .source = api.sourceName() })});
     const caps = api.capabilities();
     if (caps.bits == 0) {
-        try w.print("  Zdolności backendu: brak — żadna metryka sprzętowa nie może zostać odczytana\n", .{});
+        try w.print("  {s}\n", .{i18n.t("Zdolności backendu: brak — żadna metryka sprzętowa nie może zostać odczytana")});
     } else {
-        try w.print("  Zdolności backendu: {s}\n", .{capsSummary(caps, &buf)});
+        try w.print("  {s}\n", .{i18n.tf(ta(), "Zdolności backendu: {caps}", .{ .caps = capsSummary(caps, &buf) })});
     }
     try w.print("\n", .{});
 }
@@ -601,8 +736,8 @@ fn padLabel(buf: []u8, label: []const u8) []const u8 {
 fn runBench(alloc: std.mem.Allocator, api: msr.Backend, nominal: u64) !u8 {
     const w = out();
     try w.print("FerrumScope sensors --bench\n", .{});
-    try w.print("Źródło: {s}\n", .{api.sourceName()});
-    try w.print("UWAGA: to koszt silnika i backendu BEZ I/O. Nie jest to koszt odczytu MSR.\n\n", .{});
+    try w.print("{s}\n", .{i18n.tf(ta(), "Źródło: {source}", .{ .source = api.sourceName() })});
+    try w.print("{s}\n\n", .{i18n.t("UWAGA: to koszt silnika i backendu BEZ I/O. Nie jest to koszt odczytu MSR.")});
 
     const metric = catalog.find("cpu.core.effective_frequency").?;
     const intervals = [_]u64{
@@ -613,7 +748,7 @@ fn runBench(alloc: std.mem.Allocator, api: msr.Backend, nominal: u64) !u8 {
     };
     const cycles = 2000;
 
-    try w.print("  interwał     cykli    ns/cykl     odczytów MSR/cykl\n", .{});
+    try w.print("  {s}\n", .{i18n.t("interwał     cykli    ns/cykl     odczytów MSR/cykl")});
     try w.print("  ----------   ------   ---------   ------------------\n", .{});
 
     for (intervals) |iv| {
@@ -650,13 +785,13 @@ fn runBench(alloc: std.mem.Allocator, api: msr.Backend, nominal: u64) !u8 {
 
 fn cmdReplay(alloc: std.mem.Allocator, path: []const u8, rest: [][:0]u8) !u8 {
     const text = std.fs.cwd().readFileAlloc(alloc, path, 8 * 1024 * 1024) catch |e| {
-        try errw().print("ferrumscope: nie mogę czytać '{s}': {t}\n", .{ path, e });
+        try fail(i18n.tf(ta(), "nie mogę czytać '{path}': {err}", .{ .path = path, .err = @errorName(e) }));
         return 1;
     };
     defer alloc.free(text);
 
     const captured = cpuimg.parse(text) catch |e| {
-        try errw().print("ferrumscope: '{s}' nie jest poprawnym plikiem capture: {t}\n", .{ path, e });
+        try fail(i18n.tf(ta(), "'{path}' nie jest poprawnym plikiem capture: {err}", .{ .path = path, .err = @errorName(e) }));
         return 1;
     };
 
@@ -669,7 +804,7 @@ fn cmdReplay(alloc: std.mem.Allocator, path: []const u8, rest: [][:0]u8) !u8 {
         } else if (std.mem.eql(u8, a, "--explain")) {
             mode = .explain;
         } else {
-            try errw().print("ferrumscope: nieznana opcja replay '{s}'\n", .{a});
+            try fail(i18n.tf(ta(), "nieznana opcja replay '{option}'", .{ .option = a }));
             return 2;
         }
     }
@@ -681,7 +816,7 @@ fn cmdReplay(alloc: std.mem.Allocator, path: []const u8, rest: [][:0]u8) !u8 {
     rp.source = path;
     const res = probe.run(rp.create());
     if (res.getStatus() != .ok) {
-        try errw().print("ferrumscope: replay nie powiódł się ({s})\n", .{res.getStatus().toSlice()});
+        try fail(i18n.tf(ta(), "replay nie powiódł się ({status})", .{ .status = res.getStatus().toSlice() }));
         return 1;
     }
     const db = embedded.load() catch return 1;
@@ -697,32 +832,46 @@ fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb, mode: Mode, origin: 
         .text => {
             var name_buf: [128]u8 = undefined;
             try w.print("FerrumScope {s}  [{s}]\n\n", .{ version, origin });
-            try w.print("  Name        : {s}\n", .{info.displayName(&name_buf)});
-            try w.print("  Vendor      : {s}\n", .{info.vendor.toSlice()});
-            try w.print("  Signature   : 0x{X:0>8}  (Family {d}, Model 0x{X:0>2}, Stepping {d})\n", .{
-                info.signature.eax, info.display_family, info.display_model, info.stepping,
-            });
-            if (info.microarchitecture) |m| try w.print("  Microarch   : {s}\n", .{m});
-            if (info.codename) |c| try w.print("  Codename    : {s}\n", .{c});
+            var hx1: [16]u8 = undefined;
+            var hx2: [16]u8 = undefined;
+            try row(w, i18n.t("Name"), "{s}", .{info.displayName(&name_buf)});
+            try row(w, i18n.t("Vendor"), "{s}", .{info.vendor.toSlice()});
+            try row(w, i18n.t("Signature"), "{s}", .{i18n.tf(ta(), "{signature}  (Family {family}, Model 0x{model}, Stepping {stepping})", .{
+                .signature = std.fmt.bufPrint(&hx1, "0x{X:0>8}", .{info.signature.eax}) catch "?",
+                .family = info.display_family,
+                .model = std.fmt.bufPrint(&hx2, "{X:0>2}", .{info.display_model}) catch "?",
+                .stepping = info.stepping,
+            })});
+            if (info.microarchitecture) |m| try row(w, i18n.t("Microarch"), "{s}", .{m});
+            if (info.codename) |c| try row(w, i18n.t("Codename"), "{s}", .{c});
             // Nazwa kodowa stepppingu to **interpretacja**, nie pomiar, więc
             // zawsze wypisujemy obok niej źródło i pewność. Surowy stepping
             // wypisany wyżej pochodzi z CPUID i tego nie wymaga.
-            if (info.stepping_name) |s| try w.print("  Stepping nm : {s} (źródło: {s}, pewność: {s})\n", .{
-                s, info.stepping_name_source.toSlice(), info.stepping_name_provenance.confidence.toSlice(),
-            });
-            if (info.socket_name) |s| try w.print("  Socket      : {s} (źródło: {s}, pewność: {s})\n", .{
-                s, info.socket_source.toSlice(), info.socket_confidence.toSlice(),
-            });
-            if (info.variant) |v| try w.print("  Variant     : {s} (źródło: {s})\n", .{ v, info.variant_source.toSlice() });
-            try w.print("  Cores       : {d} physical / {d} logical ({d} wątk/rdzeń, źródło: {s})\n", .{
-                info.cores_physical,            info.threads_logical, info.threads_per_core,
-                info.topology_source.toSlice(),
-            });
+            if (info.stepping_name) |s| try row(w, i18n.t("Stepping nm"), "{s}", .{i18n.tf(ta(), "{value} (źródło: {source}, pewność: {confidence})", .{
+                .value = s,
+                .source = info.stepping_name_source.toSlice(),
+                .confidence = info.stepping_name_provenance.confidence.toSlice(),
+            })});
+            if (info.socket_name) |s| try row(w, i18n.t("Socket"), "{s}", .{i18n.tf(ta(), "{value} (źródło: {source}, pewność: {confidence})", .{
+                .value = s,
+                .source = info.socket_source.toSlice(),
+                .confidence = info.socket_confidence.toSlice(),
+            })});
+            if (info.variant) |v| try row(w, i18n.t("Variant"), "{s}", .{i18n.tf(ta(), "{value} (źródło: {source})", .{
+                .value = v,
+                .source = info.variant_source.toSlice(),
+            })});
+            try row(w, i18n.t("Cores"), "{s}", .{i18n.tf(ta(), "{physical} physical / {logical} logical ({per_core} wątk/rdzeń, źródło: {source})", .{
+                .physical = info.cores_physical,
+                .logical = info.threads_logical,
+                .per_core = info.threads_per_core,
+                .source = info.topology_source.toSlice(),
+            })});
             if (info.packages > 1) {
                 // Liczba gniazd jest z pomiaru (bity x2APIC powyżej najwyższego
                 // shiftu), nie z bazy. Bez tego wiersza maszyna 2-gniazdowa
                 // wyglądałaby jak jednoprocesorowa.
-                try w.print("  Sockets     : {d} gniazda\n", .{info.packages});
+                try row(w, i18n.t("Sockets"), "{s}", .{i18n.tp(ta(), "{n} gniazda", info.packages, .{})});
             }
             // Topologia hybrydowa: jedna liczba wątków na rdzeń **nie istnieje**,
             // więc `threads_per_core = 0`. Podział na typy wypisujemy osobno —
@@ -734,46 +883,52 @@ fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb, mode: Mode, origin: 
             // zmiany tego miejsca w kodzie.
             const classes = info.coreClassSlice();
             if (info.hybrid or classes.len > 1) {
-                try w.print("               hybrydowy, maks. {d} wątki/rdzeń:\n", .{info.smt_max});
+                try w.print("               {s}\n", .{i18n.tf(ta(), "hybrydowy, maks. {smt} wątki/rdzeń:", .{ .smt = info.smt_max })});
                 for (classes) |c| {
                     if (c.name.len > 0) {
                         try w.print("                 {d} x {s}\n", .{ c.cores, c.name });
                     } else {
-                        try w.print("                 {d} x klasa 0x{X:0>2} (numeracja nieznana)\n", .{ c.cores, c.value });
+                        var hx: [8]u8 = undefined;
+                        try w.print("                 {s}\n", .{i18n.tf(ta(), "{cores} x klasa 0x{value} (numeracja nieznana)", .{
+                            .cores = c.cores,
+                            .value = std.fmt.bufPrint(&hx, "{X:0>2}", .{c.value}) catch "?",
+                        })});
                     }
                 }
             } else if (info.core_type != .unknown) {
-                try w.print("               typ rdzenia: {s}\n", .{info.core_type.toSlice()});
+                try w.print("               {s}\n", .{i18n.tf(ta(), "typ rdzenia: {type}", .{ .type = info.core_type.toSlice() })});
             }
             // Gdy topologia nie jest pewna, mówimy to wprost, zamiast
             // pokazywać 0 jako gdyby to była liczba rdzeni.
             if (!info.topology_confident and info.threads_logical != 0) {
-                try w.print("               UWAGA: liczba rdzeni fizycznych nieustalona (topologia niepewna)\n", .{});
+                try w.print("               {s}\n", .{i18n.t("UWAGA: liczba rdzeni fizycznych nieustalona (topologia niepewna)")});
             }
-            if (info.smt) try w.print("  SMT         : yes\n", .{});
+            if (info.smt) try row(w, i18n.t("SMT"), "{s}", .{i18n.t("yes")});
 
+            var lb: [128]u8 = undefined;
             if (info.cacheSlice().len > 0) {
-                try w.print("  Caches      :\n", .{});
+                try w.print("  {s}:\n", .{padCols(&lb, i18n.t("Caches"), 12)});
                 for (info.cacheSlice()) |c| {
-                    try w.print("      L{d} {s: <12} {d: >6} KiB  {d}-way, line {d} B\n", .{
-                        c.level,         @tagName(c.kind), (c.size_bytes + 1023) / 1024,
-                        c.associativity, c.line_size,
+                    try w.print("      L{d} {s: <12} {d: >6} KiB  {s}\n", .{
+                        c.level,                                                                                       @tagName(c.kind), (c.size_bytes + 1023) / 1024,
+                        i18n.tf(ta(), "{ways}-way, line {line} B", .{ .ways = c.associativity, .line = c.line_size }),
                     });
                 }
             }
             var feat_buf: [512]u8 = undefined;
             const feat_list = writeFeatureNames(info.features, &feat_buf);
-            try w.print("  Features    : {d} flagów{s}{s}\n", .{
-                info.features.countSet(), if (feat_list.len > 0) ": " else "", feat_list,
+            try row(w, i18n.t("Features"), "{s}{s}{s}", .{
+                i18n.tp(ta(), "{n} flagów", info.features.countSet(), .{}), if (feat_list.len > 0) ": " else "", feat_list,
             });
 
-            try w.print("\n  Dmatch      : {s} (display={s}, decode={s})\n", .{
+            try w.writeAll("\n");
+            try row(w, i18n.t("Dmatch"), "{s} (display={s}, decode={s})", .{
                 info.match.toSlice(), @tagName(info.display), outcome.toSlice(),
             });
-            if (info.db_source) |s| try w.print("  Db source   : {s}\n", .{s});
-            if (info.db_source_url) |s| try w.print("  Db url      : {s}\n", .{s});
+            if (info.db_source) |s| try row(w, i18n.t("Db source"), "{s}", .{s});
+            if (info.db_source_url) |s| try row(w, i18n.t("Db url"), "{s}", .{s});
             if (raw_info.diagnostics.len > 0) {
-                try w.print("\n  Diagnostics :\n", .{});
+                try w.print("\n  {s}:\n", .{padCols(&lb, i18n.t("Diagnostics"), 12)});
                 for (0..raw_info.diagnostics.len) |i| {
                     try w.print("      - {s}\n", .{raw_info.diagnostics.get(i)});
                 }
@@ -781,9 +936,12 @@ fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb, mode: Mode, origin: 
         },
         .json => try writeJson(w, &info, outcome, raw_info.cpuid.len),
         .raw => {
-            try w.print("# surowy obraz CPUID ({d} liści, max_basic=0x{X}, max_extended=0x{X})\n", .{
-                raw_info.cpuid.len, raw_info.cpuid.max_basic, raw_info.cpuid.max_extended,
-            });
+            var hb: [16]u8 = undefined;
+            var he: [16]u8 = undefined;
+            try w.print("# {s}\n", .{i18n.tp(ta(), "surowy obraz CPUID ({n} liści, max_basic=0x{basic}, max_extended=0x{extended})", raw_info.cpuid.len, .{
+                .basic = std.fmt.bufPrint(&hb, "{X}", .{raw_info.cpuid.max_basic}) catch "?",
+                .extended = std.fmt.bufPrint(&he, "{X}", .{raw_info.cpuid.max_extended}) catch "?",
+            })});
             for (raw_info.cpuid.slice()) |e| {
                 try w.print("leaf 0x{X:0>8} sub 0x{X:0>2}  eax=0x{X:0>8} ebx=0x{X:0>8} ecx=0x{X:0>8} edx=0x{X:0>8}\n", .{
                     e.leaf, e.subleaf, e.regs.eax, e.regs.ebx, e.regs.ecx, e.regs.edx,
@@ -795,10 +953,10 @@ fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb, mode: Mode, origin: 
             // To jest surowa cegiełka, na której stoi cała topologia — bez niej
             // nie ma czego debugować, gdy wynik będzie zły.
             if (raw_info.per_cpu.len > 0) {
-                try w.print(
-                    "\n# per-logical-CPU ({d} procesorow, odczytanych {d})\n",
-                    .{ raw_info.per_cpu.len, raw_info.scanned_cpus },
-                );
+                try w.print("\n# {s}\n", .{i18n.tf(ta(), "per-logical-CPU ({count} procesorow, odczytanych {scanned})", .{
+                    .count = raw_info.per_cpu.len,
+                    .scanned = raw_info.scanned_cpus,
+                })});
                 for (raw_info.per_cpu.slice()) |c| {
                     try w.print("cpu {d} (apic={d}{s})\n", .{
                         c.id,
@@ -812,62 +970,63 @@ fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb, mode: Mode, origin: 
                     }
                 }
             } else {
-                try w.print("\n# per-logical-CPU: brak (backend nie deklaruje cpuid_per_logical_cpu)\n", .{});
+                try w.print("\n# {s}\n", .{i18n.t("per-logical-CPU: brak (backend nie deklaruje cpuid_per_logical_cpu)")});
             }
         },
         .explain => {
-            try w.print("Skąd pochodzą poszczególne pola:\n\n", .{});
+            var nb: [64]u8 = undefined;
+            try w.print("{s}\n\n", .{i18n.t("Skąd pochodzą poszczególne pola:")});
             try w.print("  vendor            <- CPUID.0 EBX/EDX/ECX ({s})\n", .{origin});
             try w.print("  family/model      <- CPUID.1 EAX 0x{X:0>8}\n", .{info.signature.eax});
             if (info.microarchitecture) |m|
                 try w.print("  microarchitecture <- HWDB (uarch=\"{s}\")\n", .{m})
             else
-                try w.print("  microarchitecture <- brak wpisu w HWDB\n", .{});
+                try w.print("  microarchitecture <- {s}\n", .{i18n.t("brak wpisu w HWDB")});
             if (info.codename) |c|
-                try w.print("  codename          <- HWDB (codename=\"{s}\", źródło: {s})\n", .{ c, info.codename_source.toSlice() })
+                try w.print("  codename          <- {s}\n", .{i18n.tf(ta(), "HWDB (codename=\"{codename}\", źródło: {source})", .{ .codename = c, .source = info.codename_source.toSlice() })})
             else
-                try w.print("  codename          <- brak wpisu w HWDB\n", .{});
+                try w.print("  codename          <- {s}\n", .{i18n.t("brak wpisu w HWDB")});
             // Provenance rozbite na osobne pola, bo „źródło” i „pewność” to dwie
             // osie: obserwacja na sprzęcie bywa pewna (mamy własny pomiar) i wciąż
             // nie jest dokumentacją producenta.
             if (info.stepping_name) |s| {
-                try w.print("  stepping_name     <- \"{s}\" (źródło: {s}, typ: {s}, pewność: {s})\n", .{
-                    s,
-                    info.stepping_name_source.toSlice(),
-                    info.stepping_name_provenance.source_type.toSlice(),
-                    info.stepping_name_provenance.confidence.toSlice(),
-                });
+                try w.print("  stepping_name     <- {s}\n", .{i18n.tf(ta(), "\"{value}\" (źródło: {source}, typ: {type}, pewność: {confidence})", .{
+                    .value = s,
+                    .source = info.stepping_name_source.toSlice(),
+                    .type = info.stepping_name_provenance.source_type.toSlice(),
+                    .confidence = info.stepping_name_provenance.confidence.toSlice(),
+                })});
                 if (info.stepping_name_provenance.notes) |n|
-                    try w.print("      notatka        <- {s}\n", .{n});
+                    try w.print("      {s}<- {s}\n", .{ padCols(&nb, i18n.t("notatka"), 15), n });
             } else {
-                try w.print("  stepping_name     <- brak wpisu; surowy stepping z CPUID pozostaje nietknięty\n", .{});
+                try w.print("  stepping_name     <- {s}\n", .{i18n.t("brak wpisu; surowy stepping z CPUID pozostaje nietknięty")});
             }
             if (info.socket_name) |s| {
-                try w.print("  socket_name       <- \"{s}\" (źródło: {s}, typ: {s}, pewność: {s})\n", .{
-                    s,
-                    info.socket_source.toSlice(),
-                    info.socket_provenance.source_type.toSlice(),
-                    info.socket_confidence.toSlice(),
-                });
+                try w.print("  socket_name       <- {s}\n", .{i18n.tf(ta(), "\"{value}\" (źródło: {source}, typ: {type}, pewność: {confidence})", .{
+                    .value = s,
+                    .source = info.socket_source.toSlice(),
+                    .type = info.socket_provenance.source_type.toSlice(),
+                    .confidence = info.socket_confidence.toSlice(),
+                })});
                 if (info.socket_provenance.notes) |n|
-                    try w.print("      notatka        <- {s}\n", .{n});
+                    try w.print("      {s}<- {s}\n", .{ padCols(&nb, i18n.t("notatka"), 15), n });
             }
             if (info.package_contacts != 0)
-                try w.print("  package_contacts  <- {d} (z HWDB)\n", .{info.package_contacts})
+                try w.print("  package_contacts  <- {s}\n", .{i18n.tf(ta(), "{count} (z HWDB)", .{ .count = info.package_contacts })})
             else
-                try w.print("  package_contacts  <- nieznana (nie zgadujemy liczby pinów)\n", .{});
+                try w.print("  package_contacts  <- {s}\n", .{i18n.t("nieznana (nie zgadujemy liczby pinów)")});
             // SMBIOS trzymamy osobno: `Socket Designation` to slot na płycie
             // (`CPU1`, `J202`), a nie typ gniazda procesora.
             if (info.smbios_socket_designation) |d|
-                try w.print("  smbios_socket     <- \"{s}\" (slot na płycie, NIE typ gniazda)\n", .{d})
+                try w.print("  smbios_socket     <- {s}\n", .{i18n.tf(ta(), "\"{value}\" (slot na płycie, NIE typ gniazda)", .{ .value = d })})
             else
-                try w.print("  smbios_socket     <- brak odczytu SMBIOS\n", .{});
-            if (info.variant) |v| try w.print("  variant           <- \"{s}\" (źródło: {s}, typ: {s}, pewność: {s})\n", .{
-                v,
-                info.variant_source.toSlice(),
-                info.variant_provenance.source_type.toSlice(),
-                info.variant_provenance.confidence.toSlice(),
-            });
+                try w.print("  smbios_socket     <- {s}\n", .{i18n.t("brak odczytu SMBIOS")});
+            if (info.variant) |v| try w.print("  variant           <- {s}\n", .{i18n.tf(ta(), "\"{value}\" (źródło: {source}, typ: {type}, pewność: {confidence})", .{
+                .value = v,
+                .source = info.variant_source.toSlice(),
+                .type = info.variant_provenance.source_type.toSlice(),
+                .confidence = info.variant_provenance.confidence.toSlice(),
+            })});
             try w.print("  display           <- {s}\n", .{explainDisplay(info.display)});
             if (info.db_source) |s| try w.print("  provenance        <- \"{s}\"\n", .{s});
             if (info.db_source_url) |s| try w.print("  provenance url    <- {s}\n", .{s});
@@ -983,7 +1142,7 @@ fn jsonOptStr(s: ?[]const u8, buf: []u8) []const u8 {
 fn cmdCapture(path: []const u8) !u8 {
     const res = probe.run(native.create());
     if (res.getStatus() != .ok) {
-        try errw().print("ferrumscope: nie mogę odczytać CPU ({s})\n", .{res.getStatus().toSlice()});
+        try fail(i18n.tf(ta(), "nie mogę odczytać CPU ({status})", .{ .status = res.getStatus().toSlice() }));
         return 1;
     }
     const raw_info = res.unwrap().?;
@@ -991,23 +1150,26 @@ fn cmdCapture(path: []const u8) !u8 {
     var buf: [64 * 1024]u8 = undefined;
     var stream = std.Io.Writer.fixed(&buf);
     cpuimg.format(&stream, "native", &raw_info.cpuid, &raw_info.per_cpu) catch |e| {
-        try errw().print("ferrumscope: nie udało się przygotować capture: {t}\n", .{e});
+        try fail(i18n.tf(ta(), "nie udało się przygotować capture: {err}", .{ .err = @errorName(e) }));
         return 1;
     };
 
     if (std.fs.path.dirname(path)) |dir| std.fs.cwd().makePath(dir) catch {};
     var file = std.fs.cwd().createFile(path, .{ .truncate = true }) catch |e| {
-        try errw().print("ferrumscope: nie mogę zapisać '{s}': {t}\n", .{ path, e });
+        try fail(i18n.tf(ta(), "nie mogę zapisać '{path}': {err}", .{ .path = path, .err = @errorName(e) }));
         return 1;
     };
     defer file.close();
     file.writeAll(stream.buffered()) catch |e| {
-        try errw().print("ferrumscope: zapis '{s}': {t}\n", .{ path, e });
+        try fail(i18n.tf(ta(), "zapis '{path}': {err}", .{ .path = path, .err = @errorName(e) }));
         return 1;
     };
-    try out().print("zapisano {s}: {d} liści CPUID + {d} CPU per-procesor, {d} B\n", .{
-        path, raw_info.cpuid.len, raw_info.per_cpu.len, stream.buffered().len,
-    });
+    try out().print("{s}\n", .{i18n.tf(ta(), "zapisano {path}: {leaves} liści CPUID + {cpus} CPU per-procesor, {bytes} B", .{
+        .path = path,
+        .leaves = raw_info.cpuid.len,
+        .cpus = raw_info.per_cpu.len,
+        .bytes = stream.buffered().len,
+    })});
     return 0;
 }
 
@@ -1057,6 +1219,18 @@ const DiffList = struct {
         self.len += 1;
     }
 
+    /// Wiersz `etykieta: …  vs  …` — etykieta (przetłumaczona) wyrównana do
+    /// `col` kolumn, wartości formatowane osobno.
+    fn row(self: *DiffList, label: []const u8, col: usize, comptime fmt: []const u8, args: anytype) void {
+        var lb: [96]u8 = undefined;
+        var vb: [width]u8 = undefined;
+        const v = std.fmt.bufPrint(&vb, fmt, args) catch {
+            self.truncated = true;
+            return;
+        };
+        self.add("{s}{s}", .{ padCols(&lb, label, col), v });
+    }
+
     fn get(self: *const DiffList, i: usize) []const u8 {
         return self.buf[i][0..self.lens[i]];
     }
@@ -1064,13 +1238,13 @@ const DiffList = struct {
 
 fn loadCapture(alloc: std.mem.Allocator, path: []const u8) !Loaded {
     const text = std.fs.cwd().readFileAlloc(alloc, path, 8 * 1024 * 1024) catch |e| {
-        try errw().print("ferrumscope: nie mogę czytać '{s}': {t}\n", .{ path, e });
+        try fail(i18n.tf(ta(), "nie mogę czytać '{path}': {err}", .{ .path = path, .err = @errorName(e) }));
         return error.ReadFailed;
     };
     defer alloc.free(text);
 
     const captured = cpuimg.parse(text) catch |e| {
-        try errw().print("ferrumscope: '{s}' nie jest poprawnym plikiem capture: {t}\n", .{ path, e });
+        try fail(i18n.tf(ta(), "'{path}' nie jest poprawnym plikiem capture: {err}", .{ .path = path, .err = @errorName(e) }));
         return error.ParseFailed;
     };
     // Sekcję per-CPU dołączamy warunkowo — dokładnie jak robi to `replay`.
@@ -1080,12 +1254,12 @@ fn loadCapture(alloc: std.mem.Allocator, path: []const u8) !Loaded {
     rp.source = path;
     const res = probe.run(rp.create());
     if (res.getStatus() != .ok) {
-        try errw().print("ferrumscope: '{s}': replay nie powiódł się ({s})\n", .{ path, res.getStatus().toSlice() });
+        try fail(i18n.tf(ta(), "'{path}': replay nie powiódł się ({status})", .{ .path = path, .status = res.getStatus().toSlice() }));
         return error.ProbeFailed;
     }
     const raw_info = res.unwrap().?;
     const db = embedded.load() catch {
-        try errw().print("ferrumscope: wbudowana baza jest uszkodzona\n", .{});
+        try fail(i18n.t("wbudowana baza jest uszkodzona"));
         return error.DbFailed;
     };
     var info = model.CpuInfo{};
@@ -1115,9 +1289,9 @@ fn cmdCompareCaptures(alloc: std.mem.Allocator, a_path: []const u8, b_path: []co
     const brand_a = a.info.brandSlice();
     const brand_b = b.info.brandSlice();
 
-    try w.print("Porownanie znormalizowanego modelu CPU\n\n", .{});
-    try w.print("  A: {s}\n     nazwa: {s}\n", .{ a_path, a.info.displayName(&name_a) });
-    try w.print("  B: {s}\n     nazwa: {s}\n\n", .{ b_path, b.info.displayName(&name_b) });
+    try w.print("{s}\n\n", .{i18n.t("Porownanie znormalizowanego modelu CPU")});
+    try w.print("  A: {s}\n     {s}\n", .{ a_path, i18n.tf(ta(), "nazwa: {name}", .{ .name = a.info.displayName(&name_a) }) });
+    try w.print("  B: {s}\n     {s}\n\n", .{ b_path, i18n.tf(ta(), "nazwa: {name}", .{ .name = b.info.displayName(&name_b) }) });
 
     var d = DiffList{};
     var topology_differs = false;
@@ -1126,41 +1300,41 @@ fn cmdCompareCaptures(alloc: std.mem.Allocator, a_path: []const u8, b_path: []co
     // --- Tozsamosc ------------------------------------------------------------
     if (a.info.vendor != b.info.vendor) {
         identity_differs = true;
-        d.add("vendor:             {s}  vs  {s}", .{ a.info.vendor.toSlice(), b.info.vendor.toSlice() });
+        d.row(i18n.t("vendor:"), 20, "{s}  vs  {s}", .{ a.info.vendor.toSlice(), b.info.vendor.toSlice() });
     }
     if (a.info.signature.eax != b.info.signature.eax) {
         identity_differs = true;
-        d.add("sygnatura CPUID.1:  0x{X:0>8}  vs  0x{X:0>8}", .{ a.info.signature.eax, b.info.signature.eax });
+        d.row(i18n.t("sygnatura CPUID.1:"), 20, "0x{X:0>8}  vs  0x{X:0>8}", .{ a.info.signature.eax, b.info.signature.eax });
     }
     if (!std.mem.eql(u8, brand_a, brand_b)) {
         identity_differs = true;
-        d.add("brand string:       '{s}'  vs  '{s}'", .{ brand_a, brand_b });
+        d.row(i18n.t("brand string:"), 20, "'{s}'  vs  '{s}'", .{ brand_a, brand_b });
     }
 
     // --- Topologia ------------------------------------------------------------
     if (a.info.cores_physical != b.info.cores_physical) {
         topology_differs = true;
-        d.add("rdzenie fizyczne:  {d}  vs  {d}", .{ a.info.cores_physical, b.info.cores_physical });
+        d.row(i18n.t("rdzenie fizyczne:"), 19, "{d}  vs  {d}", .{ a.info.cores_physical, b.info.cores_physical });
     }
     if (a.info.threads_logical != b.info.threads_logical) {
         topology_differs = true;
-        d.add("procesory logiczne: {d}  vs  {d}", .{ a.info.threads_logical, b.info.threads_logical });
+        d.row(i18n.t("procesory logiczne:"), 20, "{d}  vs  {d}", .{ a.info.threads_logical, b.info.threads_logical });
     }
     if (a.info.threads_per_core != b.info.threads_per_core) {
         topology_differs = true;
-        d.add("watki/rdzen:        {d}  vs  {d}", .{ a.info.threads_per_core, b.info.threads_per_core });
+        d.row(i18n.t("watki/rdzen:"), 20, "{d}  vs  {d}", .{ a.info.threads_per_core, b.info.threads_per_core });
     }
     if (a.info.packages != b.info.packages) {
         topology_differs = true;
-        d.add("gniazda:            {d}  vs  {d}", .{ a.info.packages, b.info.packages });
+        d.row(i18n.t("gniazda:"), 20, "{d}  vs  {d}", .{ a.info.packages, b.info.packages });
     }
     if (a.info.dies != b.info.dies) {
         topology_differs = true;
-        d.add("die:                {d}  vs  {d}", .{ a.info.dies, b.info.dies });
+        d.row(i18n.t("die:"), 20, "{d}  vs  {d}", .{ a.info.dies, b.info.dies });
     }
     if (a.info.hybrid != b.info.hybrid or a.info.heterogeneous != b.info.heterogeneous) {
         topology_differs = true;
-        d.add("hybrydowy:          {any}/{any}  vs  {any}/{any}", .{
+        d.row(i18n.t("hybrydowy:"), 20, "{any}/{any}  vs  {any}/{any}", .{
             a.info.hybrid, a.info.heterogeneous, b.info.hybrid, b.info.heterogeneous,
         });
     }
@@ -1171,25 +1345,29 @@ fn cmdCompareCaptures(alloc: std.mem.Allocator, a_path: []const u8, b_path: []co
         const cb = b.info.coreClassSlice();
         if (ca.len != cb.len) {
             topology_differs = true;
-            d.add("liczba klas rdzeni: {d}  vs  {d}", .{ ca.len, cb.len });
+            d.row(i18n.t("liczba klas rdzeni:"), 20, "{d}  vs  {d}", .{ ca.len, cb.len });
         } else {
             var k: usize = 0;
             while (k < ca.len) : (k += 1) {
                 if (ca[k].value != cb[k].value or ca[k].cores != cb[k].cores) {
                     topology_differs = true;
-                    d.add("klasa 0x{X:0>2}:        {d} rdzeni  vs  {d} rdzeni", .{ ca[k].value, ca[k].cores, cb[k].cores });
+                    var hx: [8]u8 = undefined;
+                    const lab = i18n.tf(ta(), "klasa 0x{value}:", .{ .value = std.fmt.bufPrint(&hx, "{X:0>2}", .{ca[k].value}) catch "?" });
+                    d.row(lab, 19, "{s}", .{i18n.tf(ta(), "{a} rdzeni  vs  {b} rdzeni", .{ .a = ca[k].cores, .b = cb[k].cores })});
                 }
             }
         }
     }
     if (a.info.cacheSlice().len != b.info.cacheSlice().len) {
         topology_differs = true;
-        d.add("liczba cache'ow:    {d}  vs  {d}", .{ a.info.cacheSlice().len, b.info.cacheSlice().len });
+        d.row(i18n.t("liczba cache'ow:"), 20, "{d}  vs  {d}", .{ a.info.cacheSlice().len, b.info.cacheSlice().len });
     } else {
         for (a.info.cacheSlice(), b.info.cacheSlice()) |ca, cb| {
             if (ca.size_bytes != cb.size_bytes or ca.level != cb.level or ca.kind != cb.kind) {
                 topology_differs = true;
-                d.add("cache L{d} {s}:     {d} B  vs  {d} B", .{ ca.level, @tagName(ca.kind), ca.size_bytes, cb.size_bytes });
+                const lab = i18n.tf(ta(), "cache L{level} {kind}:", .{ .level = ca.level, .kind = @tagName(ca.kind) });
+                const cols = std.unicode.utf8CountCodepoints(lab) catch lab.len;
+                d.row(lab, cols + 5, "{d} B  vs  {d} B", .{ ca.size_bytes, cb.size_bytes });
                 break;
             }
         }
@@ -1200,15 +1378,18 @@ fn cmdCompareCaptures(alloc: std.mem.Allocator, a_path: []const u8, b_path: []co
     var capability_differs = false;
     if (a.has_per_cpu != b.has_per_cpu) {
         capability_differs = true;
-        d.add("sekcja per-CPU:     {any}  vs  {any}  (zdolnosc backendu)", .{ a.has_per_cpu, b.has_per_cpu });
+        d.row(i18n.t("sekcja per-CPU:"), 20, "{s}", .{i18n.tf(ta(), "{a}  vs  {b}  (zdolnosc backendu)", .{
+            .a = @as([]const u8, if (a.has_per_cpu) "true" else "false"),
+            .b = @as([]const u8, if (b.has_per_cpu) "true" else "false"),
+        })});
     }
     if (a.scanned != b.scanned) {
         capability_differs = true;
-        d.add("odczytanych CPU:    {d}  vs  {d}", .{ a.scanned, b.scanned });
+        d.row(i18n.t("odczytanych CPU:"), 20, "{d}  vs  {d}", .{ a.scanned, b.scanned });
     }
     if (a.info.topology_source != b.info.topology_source) {
         capability_differs = true;
-        d.add("zrodlo topologii:   {s}  vs  {s}", .{
+        d.row(i18n.t("zrodlo topologii:"), 20, "{s}  vs  {s}", .{
             a.info.topology_source.toSlice(), b.info.topology_source.toSlice(),
         });
     }
@@ -1241,28 +1422,28 @@ fn cmdCompareCaptures(alloc: std.mem.Allocator, a_path: []const u8, b_path: []co
         .identical;
 
     if (d.len > 0) {
-        try w.print("Roznice:\n", .{});
+        try w.print("{s}\n", .{i18n.t("Roznice:")});
         for (0..d.len) |k| {
             try w.print("  {s}\n", .{d.get(k)});
         }
         if (d.truncated) {
-            try w.print("  ... lista roznic ucieta (pokazano {d} z wiecej)\n", .{DiffList.cap});
+            try w.print("  {s}\n", .{i18n.tf(ta(), "... lista roznic ucieta (pokazano {count} z wiecej)", .{ .count = DiffList.cap })});
         }
         try w.print("\n", .{});
     } else if (format_only) {
-        try w.print("Model identyczny; pliki roznia sie tylko liczba zapisanych lisci ({d} vs {d}).\n\n", .{ a.leaves, b.leaves });
+        try w.print("{s}\n\n", .{i18n.tf(ta(), "Model identyczny; pliki roznia sie tylko liczba zapisanych lisci ({a} vs {b}).", .{ .a = a.leaves, .b = b.leaves })});
     } else {
-        try w.print("Model identyczny.\n\n", .{});
+        try w.print("{s}\n\n", .{i18n.t("Model identyczny.")});
     }
 
     const label = switch (verdict) {
-        .identical => "IDENTYCZNE",
-        .format_only => "ROZNICA FORMATU (model ten sam)",
-        .missing_capability => "BRAK ZDOLNOSCI (model ten sam, pomiar mniej wiarygodny)",
-        .hardware_mismatch => "NIEDOPASOWANIE SPRZETU (ta sama sygnatura, inna topologia)",
-        .different_cpu => "INNY PROCESOR (rozna sygnatura CPUID)",
+        .identical => i18n.t("IDENTYCZNE"),
+        .format_only => i18n.t("ROZNICA FORMATU (model ten sam)"),
+        .missing_capability => i18n.t("BRAK ZDOLNOSCI (model ten sam, pomiar mniej wiarygodny)"),
+        .hardware_mismatch => i18n.t("NIEDOPASOWANIE SPRZETU (ta sama sygnatura, inna topologia)"),
+        .different_cpu => i18n.t("INNY PROCESOR (rozna sygnatura CPUID)"),
     };
-    try w.print("Werdykt: {s}\n", .{label});
+    try w.print("{s}\n", .{i18n.tf(ta(), "Werdykt: {verdict}", .{ .verdict = label })});
 
     // Kod wyjscia ma byc uzyteczny w skryptach: 0 = ten sam sprzet, 1 = inny.
     return switch (verdict) {
@@ -1273,15 +1454,16 @@ fn cmdCompareCaptures(alloc: std.mem.Allocator, a_path: []const u8, b_path: []co
 
 fn cmdHwdb() !u8 {
     const db = embedded.load() catch {
-        try errw().print("ferrumscope: wbudowana baza jest uszkodzona\n", .{});
+        try fail(i18n.t("wbudowana baza jest uszkodzona"));
         return 1;
     };
     const w = out();
-    try w.print("ferrum-hwdb.bin (wbudowana)\n", .{});
+    try w.print("{s}\n", .{i18n.t("ferrum-hwdb.bin (wbudowana)")});
     try w.print("  format        : {d}\n", .{hwdb_mod.format_version});
     try w.print("  schema        : {d}\n", .{db.schema});
     try w.print("  db_revision   : {d}\n", .{db.db_revision});
-    try w.print("  wpisów        : {d}\n", .{db.count()});
+    var lb: [96]u8 = undefined;
+    try w.print("  {s}: {d}\n", .{ padCols(&lb, i18n.t("wpisów"), 14), db.count() });
 
     var by_vendor: [7]usize = [_]usize{0} ** 7;
     var i: usize = 0;
@@ -1307,7 +1489,7 @@ const report_mod = ferrum.sys.report;
 
 fn readArgFile(alloc: std.mem.Allocator, path: []const u8) ?[]u8 {
     return std.fs.cwd().readFileAlloc(alloc, path, 64 * 1024 * 1024) catch |e| {
-        errw().print("ferrumscope: nie mogę czytać '{s}': {t}\n", .{ path, e }) catch {};
+        fail(i18n.tf(ta(), "nie mogę czytać '{path}': {err}", .{ .path = path, .err = @errorName(e) })) catch {};
         return null;
     };
 }
@@ -1328,7 +1510,7 @@ fn cmdReport(alloc: std.mem.Allocator, rest: [][:0]u8, only: ?[]const u8) !u8 {
         const a = rest[i];
         if (std.mem.startsWith(u8, a, "--format=")) {
             format = std.meta.stringToEnum(Format, a["--format=".len..]) orelse {
-                try errw().print("ferrumscope: nieznany format '{s}' (txt|html|json)\n", .{a});
+                try fail(i18n.tf(ta(), "nieznany format '{format}' (txt|html|json)", .{ .format = a }));
                 return 2;
             };
         } else if (std.mem.eql(u8, a, "-o") and i + 1 < rest.len) {
@@ -1349,7 +1531,7 @@ fn cmdReport(alloc: std.mem.Allocator, rest: [][:0]u8, only: ?[]const u8) !u8 {
             opts.cpu_replay = cpu_text;
             opts.cpu_replay_name = rest[i];
         } else {
-            try errw().print("ferrumscope: nieznana opcja '{s}'\n", .{a});
+            try fail(i18n.tf(ta(), "nieznana opcja '{option}'", .{ .option = a }));
             return 2;
         }
     }
@@ -1377,7 +1559,7 @@ fn cmdReport(alloc: std.mem.Allocator, rest: [][:0]u8, only: ?[]const u8) !u8 {
     var fw: std.fs.File.Writer = undefined;
     const w: *std.Io.Writer = if (out_path) |p| blk: {
         file = std.fs.cwd().createFile(p, .{}) catch |e| {
-            try errw().print("ferrumscope: nie mogę utworzyć '{s}': {t}\n", .{ p, e });
+            try fail(i18n.tf(ta(), "nie mogę utworzyć '{path}': {err}", .{ .path = p, .err = @errorName(e) }));
             return 1;
         };
         fw = file.?.writer(&fbuf);
@@ -1389,13 +1571,16 @@ fn cmdReport(alloc: std.mem.Allocator, rest: [][:0]u8, only: ?[]const u8) !u8 {
         .json => try report_mod.writeJson(w, r, opts_export),
     }
     try w.flush();
-    if (out_path) |p| try errw().print("zapisano: {s} (numery seryjne: {s})\n", .{ p, if (opts_export.include_serials) "jawne" else "zamaskowane" });
+    if (out_path) |p| try errw().print("{s}\n", .{i18n.tf(ta(), "zapisano: {path} (numery seryjne: {serials})", .{
+        .path = p,
+        .serials = if (opts_export.include_serials) i18n.t("jawne") else i18n.t("zamaskowane"),
+    })});
     return 0;
 }
 
 fn cmdCaptureSys(alloc: std.mem.Allocator, rest: [][:0]u8) !u8 {
     if (@import("builtin").os.tag != .windows) {
-        try errw().print("ferrumscope: capture-sys jest dostępny tylko na Windows\n", .{});
+        try fail(i18n.t("capture-sys jest dostępny tylko na Windows"));
         return 1;
     }
     var path: ?[]const u8 = null;
@@ -1404,7 +1589,7 @@ fn cmdCaptureSys(alloc: std.mem.Allocator, rest: [][:0]u8) !u8 {
         if (std.mem.eql(u8, a, "--include-serials")) include = true else path = a;
     }
     const p = path orelse {
-        try errw().print("ferrumscope: brak ścieżki pliku .sysimg\n", .{});
+        try fail(i18n.t("brak ścieżki pliku .sysimg"));
         return 2;
     };
     var arena = std.heap.ArenaAllocator.init(alloc);
@@ -1418,8 +1603,13 @@ fn cmdCaptureSys(alloc: std.mem.Allocator, rest: [][:0]u8) !u8 {
     var fw = f.writer(&buf);
     try ferrum.capture.sysimg.write(&fw.interface, s, "FerrumScope " ++ version ++ " capture-sys");
     try fw.interface.flush();
-    try errw().print("zapisano: {s} (SMBIOS {s}, {d} PCI, {d} GPU, {d} dysków, seriale: {s})\n", .{
-        p, s.smbios_status.label(), s.pci.len, s.gpus.len, s.disks.len, if (include) "JAWNE" else "zamaskowane",
-    });
+    try errw().print("{s}\n", .{i18n.tf(ta(), "zapisano: {path} (SMBIOS {smbios}, {pci} PCI, {gpus} GPU, {disks} dysków, seriale: {serials})", .{
+        .path = p,
+        .smbios = s.smbios_status.label(),
+        .pci = s.pci.len,
+        .gpus = s.gpus.len,
+        .disks = s.disks.len,
+        .serials = if (include) i18n.t("JAWNE") else i18n.t("zamaskowane"),
+    })});
     return 0;
 }

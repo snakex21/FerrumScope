@@ -83,8 +83,13 @@ fn parseCatalog(alloc: std.mem.Allocator, json: []const u8, out: *Catalog) !void
 }
 
 /// Ustawia język. `pl` = tekst źródłowy (bez katalogu). Nieznany kod → `en`.
+///
+/// Poprzednie katalogi celowo NIE są zwalniane: napisy zwrócone przez `t()`
+/// bywają przechowywane długo (powody statusu ADL/NVAPI, sterownika MSR),
+/// więc zmiana języka nie może ich unieważnić. Koszt: kilkadziesiąt KB na
+/// każdą zmianę języka (GUI i tak uruchamia się wtedy ponownie).
 pub fn setLocale(code: []const u8) void {
-    _ = arena_state.reset(.free_all);
+    arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena_state.allocator();
     current = .empty;
     fallback = .empty;
@@ -186,13 +191,25 @@ fn lookup(id: []const u8) ?Entry {
     return null;
 }
 
+/// Separator kontekstu (jak `msgctxt` w gettext): identyfikator
+/// `"pamięć\x04Gniazdo"` to tekst „Gniazdo” w znaczeniu gniazda pamięci —
+/// inny wpis katalogu niż samo „Gniazdo” (gniazdo procesora). Bez
+/// tłumaczenia pokazywany jest tekst po separatorze.
+pub const ctx_sep: u8 = 0x04;
+
+/// Tekst źródłowy bez prefiksu kontekstu.
+pub fn stripContext(id: []const u8) []const u8 {
+    const i = std.mem.lastIndexOfScalar(u8, id, ctx_sep) orelse return id;
+    return id[i + 1 ..];
+}
+
 /// Tłumaczenie identyfikatora (tekstu polskiego).
 pub fn t(id: []const u8) []const u8 {
     if (lookup(id)) |e| switch (e) {
         .text => |s| return s,
-        .plural => |f| return f[@intFromEnum(Plural.other)] orelse id,
+        .plural => |f| return f[@intFromEnum(Plural.other)] orelse stripContext(id),
     };
-    return id;
+    return stripContext(id);
 }
 
 fn pickPlural(e: Entry, code: []const u8, n: i64, id: []const u8) []const u8 {
@@ -203,7 +220,7 @@ fn pickPlural(e: Entry, code: []const u8, n: i64, id: []const u8) []const u8 {
             if (f[@intFromEnum(cat)]) |s| return s;
             if (f[@intFromEnum(Plural.other)]) |s| return s;
             if (f[@intFromEnum(Plural.many)]) |s| return s;
-            return id;
+            return stripContext(id);
         },
     }
 }
@@ -247,11 +264,48 @@ pub fn tf(alloc: std.mem.Allocator, id: []const u8, args: anytype) []const u8 {
     return substitute(alloc, t(id), args);
 }
 
-/// Tłumaczenie zależne od liczby (`{n}` dostępne zawsze).
-pub fn tp(alloc: std.mem.Allocator, id: []const u8, n: i64, args: anytype) []const u8 {
-    const tmpl = if (lookup(id)) |e| pickPlural(e, if (source_mode) "pl" else current_code, n, id) else id;
+/// Tłumaczenie zależne od liczby (`{n}` dostępne zawsze). `n` = dowolna
+/// liczba całkowita (usize, u32, i64…).
+pub fn tp(alloc: std.mem.Allocator, id: []const u8, n_any: anytype, args: anytype) []const u8 {
+    const n: i64 = @intCast(n_any);
+    const tmpl = if (lookup(id)) |e| pickPlural(e, if (source_mode) "pl" else current_code, n, id) else stripContext(id);
     const s1 = substitute(alloc, tmpl, args);
     return substitute(alloc, s1, .{ .n = n });
+}
+
+/// Znacznik „do tłumaczenia później”: zwraca tekst bez zmian, ale skaner
+/// katalogu (test kompletności) traktuje literał jako identyfikator. Do tablic
+/// stałych, które tłumaczy się `t()` dopiero w miejscu wyświetlenia.
+pub fn N(comptime id: []const u8) []const u8 {
+    return id;
+}
+
+/// Stały początek przetłumaczonego szablonu sekcji instancji — tekst do
+/// pierwszego `{` (np. `"GPU: {name}"` → `"GPU: "`). Tłumaczenia takich
+/// szablonów MUSZĄ zaczynać się od stałego tekstu (patrz locales/README.md).
+pub fn prefixOf(template_id: []const u8) []const u8 {
+    const s = t(template_id);
+    return s[0 .. std.mem.indexOfScalar(u8, s, '{') orelse s.len];
+}
+
+/// Czy `code` jest jednym z obsługiwanych kodów (dokładnie, bez normalizacji).
+pub fn isSupported(code: []const u8) bool {
+    for (locales) |l| if (std.ascii.eqlIgnoreCase(l, code)) return true;
+    return false;
+}
+
+/// Indeks języka w `locales` / `native_names`.
+pub fn indexOf(code: []const u8) ?usize {
+    for (locales, 0..) |l, i| if (std.ascii.eqlIgnoreCase(l, code)) return i;
+    return null;
+}
+
+/// Buduje tablicę źródeł z modułu generowanego przez build.zig
+/// (`locales_embedded`: równoległe tablice `codes` i `jsons`).
+pub fn embeddedSources(comptime E: type) [E.codes.len]Source {
+    var a: [E.codes.len]Source = undefined;
+    inline for (E.codes, E.jsons, 0..) |c, j, i| a[i] = .{ .code = c, .json = j };
+    return a;
 }
 
 /// Nazwy parametrów `{x}` w tekście (do testów zgodności katalogów).
@@ -320,7 +374,11 @@ test "i18n: wybór formy z katalogu i spadek do angielskiego" {
         .{ .code = "de", .json = "{\"Dysk\": \"Laufwerk\", \"{n} dysków\": {\"one\": \"{n} Laufwerk\", \"other\": \"{n} Laufwerke\"}}" },
         .{ .code = "pl", .json = "{\"{n} dysków\": {\"one\": \"{n} dysk\", \"few\": \"{n} dyski\", \"many\": \"{n} dysków\"}}" },
     });
-    defer setSources(&.{});
+    const saved = sources;
+    defer {
+        setSources(saved);
+        setLocale("pl");
+    }
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -329,6 +387,8 @@ test "i18n: wybór formy z katalogu i spadek do angielskiego" {
     try testing.expectEqualStrings("Only EN", t("Tylko EN"));
     try testing.expectEqualStrings("1 Laufwerk", tp(a, "{n} dysków", 1, .{}));
     try testing.expectEqualStrings("10 Laufwerke", tp(a, "{n} dysków", 10, .{}));
+    try testing.expectEqualStrings("Laufwerk", t("Dysk"));
+    try testing.expectEqualStrings("Gniazdo", t("pamięć\x04Gniazdo"));
     setLocale("pl");
     try testing.expectEqualStrings("Dysk", t("Dysk"));
     try testing.expectEqualStrings("3 dyski", tp(a, "{n} dysków", 3, .{}));

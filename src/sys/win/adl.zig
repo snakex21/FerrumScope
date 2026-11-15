@@ -47,6 +47,7 @@
 //! `unsupported_api` bez dotykania DLL.
 
 const std = @import("std");
+const i18n = @import("../../i18n/i18n.zig");
 const builtin = @import("builtin");
 const gv = @import("gpu_vendor.zig");
 
@@ -407,39 +408,39 @@ pub const Session = struct {
     pub fn open(alloc: Allocator) Session {
         var s: Session = .{ .alloc = alloc };
         if (builtin.os.tag != .windows or builtin.cpu.arch != .x86_64) {
-            s.fail(.unsupported_api, "ADL: obsługiwany tylko proces Windows x86_64");
+            s.fail(.unsupported_api, i18n.t("ADL: obsługiwany tylko proces Windows x86_64"));
             return s;
         }
         s.dll = gv.loadSystemDll(dll_name_64);
         if (s.dll == null) {
-            s.fail(.dll_not_found, "ADL: brak atiadlxx.dll w System32 (brak sterownika AMD)");
+            s.fail(.dll_not_found, i18n.t("ADL: brak atiadlxx.dll w System32 (brak sterownika AMD)"));
             return s;
         }
         s.fns = Fns.load(s.dll.?);
-        const create = s.fns.create orelse return s.failRet(.unsupported_api, "ADL: brak eksportu ADL2_Main_Control_Create (za stary sterownik)");
+        const create = s.fns.create orelse return s.failRet(.unsupported_api, i18n.t("ADL: brak eksportu ADL2_Main_Control_Create (za stary sterownik)"));
         if (s.fns.destroy == null or s.fns.num_adapters == null or s.fns.adapter_info == null) {
-            s.fail(.unsupported_api, "ADL: brak podstawowych eksportów ADL2_Adapter_*");
+            s.fail(.unsupported_api, i18n.t("ADL: brak podstawowych eksportów ADL2_Adapter_*"));
             return s;
         }
 
         var ctx: Ctx = null;
         const rc = create(&adlMalloc, 1, &ctx);
         if (rc != ADL_OK or ctx == null) {
-            s.fail(.{ .init_failed = rc }, "ADL: ADL2_Main_Control_Create zwrócił błąd");
+            s.fail(.{ .init_failed = rc }, i18n.t("ADL: ADL2_Main_Control_Create zwrócił błąd"));
             return s;
         }
         s.ctx = ctx;
 
         s.enumerate() catch {
-            s.fail(.{ .init_failed = ADL_ERR }, "ADL: brak pamięci przy wyliczaniu adapterów");
+            s.fail(.{ .init_failed = ADL_ERR }, i18n.t("ADL: brak pamięci przy wyliczaniu adapterów"));
             return s;
         };
         if (s.adapters.len == 0) {
-            s.fail(.no_adapters, "ADL: sterownik nie zgłosił żadnego adaptera AMD");
+            s.fail(.no_adapters, i18n.t("ADL: sterownik nie zgłosił żadnego adaptera AMD"));
             return s;
         }
         s.library.status = .available;
-        s.library.reason = "ADL: dostępne";
+        s.library.reason = i18n.t("ADL: dostępne");
         s.poll();
         return s;
     }

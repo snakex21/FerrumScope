@@ -21,9 +21,11 @@ const lookup = @import("lookup.zig");
 
 /// Dokładna strona (przypięta / z tabeli kuratorowanej) jako pierwszy odnośnik
 /// „Szukaj …” — GUI i plakietka biorą pierwszy pasujący, więc wygrywa ona.
-fn exactLink(b: *report.Builder, prefix: []const u8, exact: ?lookup.Resolved) void {
+/// `key` = `cpu_search` / `gpu_search` (stały klucz wiązania przycisków GUI).
+fn exactLink(b: *report.Builder, key: []const u8, exact: ?lookup.Resolved) void {
     const r = exact orelse return;
-    b.link(.{ .label = b.fmt("{s} — strona TechPowerUp", .{prefix}), .url = r.url, .note = r.origin.label() });
+    const label = if (std.mem.eql(u8, key, "cpu_search")) b.t("Szukaj CPU — strona TechPowerUp") else b.t("Szukaj karty — strona TechPowerUp");
+    b.link(.{ .label = label, .key = key, .url = r.url, .note = r.origin.label() });
 }
 
 /// Kodowanie procentowe zapytania (RFC 3986, spacja → `+`).
@@ -61,21 +63,22 @@ pub fn gpu(b: *report.Builder, vendor: u16, name: []const u8) void {
 }
 
 pub fn gpuExact(b: *report.Builder, vendor: u16, name: []const u8, exact: ?lookup.Resolved) void {
-    exactLink(b, "Szukaj karty", exact);
+    exactLink(b, "gpu_search", exact);
     if (mfgrOfPci(vendor)) |m| {
-        b.link(.{ .label = b.fmt("TechPowerUp GPU DB ({s})", .{m}), .url = b.fmt("https://www.techpowerup.com/gpu-specs/?mfgr={s}&sort=name", .{m}), .note = "lista bazy filtrowana po producencie" });
+        b.link(.{ .label = b.fmt("TechPowerUp GPU DB ({s})", .{m}), .key = "db", .url = b.fmt("https://www.techpowerup.com/gpu-specs/?mfgr={s}&sort=name", .{m}), .note = b.t("lista bazy filtrowana po producencie") });
     }
     if (name.len > 0) {
         b.link(.{
-            .label = "Szukaj karty w TechPowerUp",
+            .label = b.t("Szukaj karty w TechPowerUp"),
+            .key = "gpu_search",
             .url = b.fmt("https://duckduckgo.com/?q=site%3Atechpowerup.com%2Fgpu-specs+{s}", .{urlEncode(b, name)}),
-            .note = "wyszukiwanie po nazwie; ID-lookup GPU-Z jest nieudokumentowany",
+            .note = b.t("wyszukiwanie po nazwie; ID-lookup GPU-Z jest nieudokumentowany"),
         });
     }
     switch (vendor) {
-        0x1002, 0x1022 => b.link(.{ .label = "Sterowniki AMD", .url = amd_drivers }),
-        0x10DE => b.link(.{ .label = "Sterowniki NVIDIA", .url = nvidia_drivers }),
-        0x8086 => b.link(.{ .label = "Sterowniki Intel", .url = intel_drivers }),
+        0x1002, 0x1022 => b.link(.{ .label = b.tf("Sterowniki {vendor}", .{ .vendor = "AMD" }), .key = "drivers", .url = amd_drivers }),
+        0x10DE => b.link(.{ .label = b.tf("Sterowniki {vendor}", .{ .vendor = "NVIDIA" }), .key = "drivers", .url = nvidia_drivers }),
+        0x8086 => b.link(.{ .label = b.tf("Sterowniki {vendor}", .{ .vendor = "Intel" }), .key = "drivers", .url = intel_drivers }),
         else => {},
     }
 }
@@ -89,27 +92,27 @@ pub fn gpuScoped(b: *report.Builder, vendor: u16, name: []const u8, scope: []con
 }
 
 pub fn cpu(b: *report.Builder, vendor: ids.CpuVendor, name: []const u8, exact: ?lookup.Resolved) void {
-    exactLink(b, "Szukaj CPU", exact);
+    exactLink(b, "cpu_search", exact);
     const m: ?[]const u8 = switch (vendor) {
         .amd => "AMD",
         .intel => "Intel",
         else => null,
     };
-    if (m) |mm| b.link(.{ .label = b.fmt("TechPowerUp CPU DB ({s})", .{mm}), .url = b.fmt("https://www.techpowerup.com/cpu-specs/?mfgr={s}&sort=name", .{mm}) });
+    if (m) |mm| b.link(.{ .label = b.fmt("TechPowerUp CPU DB ({s})", .{mm}), .key = "db", .url = b.fmt("https://www.techpowerup.com/cpu-specs/?mfgr={s}&sort=name", .{mm}) });
     if (name.len > 0) {
-        b.link(.{ .label = "Szukaj CPU w TechPowerUp", .url = b.fmt("https://duckduckgo.com/?q=site%3Atechpowerup.com%2Fcpu-specs+{s}", .{urlEncode(b, name)}) });
+        b.link(.{ .label = b.t("Szukaj CPU w TechPowerUp"), .key = "cpu_search", .url = b.fmt("https://duckduckgo.com/?q=site%3Atechpowerup.com%2Fcpu-specs+{s}", .{urlEncode(b, name)}) });
     }
     switch (vendor) {
-        .amd => b.link(.{ .label = "Sterowniki chipsetu AMD", .url = amd_drivers }),
-        .intel => b.link(.{ .label = "Sterowniki Intel", .url = intel_drivers }),
+        .amd => b.link(.{ .label = b.tf("Sterowniki chipsetu {vendor}", .{ .vendor = "AMD" }), .key = "chipset_drivers", .url = amd_drivers }),
+        .intel => b.link(.{ .label = b.tf("Sterowniki {vendor}", .{ .vendor = "Intel" }), .key = "drivers", .url = intel_drivers }),
         else => {},
     }
 }
 
 pub fn chipset(b: *report.Builder, vendor: u16) void {
     switch (vendor) {
-        0x1022, 0x1002 => b.link(.{ .label = "Sterowniki chipsetu AMD", .url = amd_drivers }),
-        0x8086 => b.link(.{ .label = "Sterowniki chipsetu Intel", .url = intel_drivers }),
+        0x1022, 0x1002 => b.link(.{ .label = b.tf("Sterowniki chipsetu {vendor}", .{ .vendor = "AMD" }), .key = "chipset_drivers", .url = amd_drivers }),
+        0x8086 => b.link(.{ .label = b.tf("Sterowniki chipsetu {vendor}", .{ .vendor = "Intel" }), .key = "chipset_drivers", .url = intel_drivers }),
         else => {},
     }
 }

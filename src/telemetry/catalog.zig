@@ -30,6 +30,7 @@
 //! „nieobsługiwane: potwierdzenie układu bitów" zamiast „0 °C".
 
 const std = @import("std");
+const i18n = @import("../i18n/i18n.zig");
 const metrics = @import("metrics.zig");
 const msr = @import("msr.zig");
 
@@ -64,14 +65,14 @@ pub const Metric = struct {
     /// * brak czujnika na platformie → tu nic nie pomoże.
     pub fn unavailableReason(self: Metric, caps: msr.CapabilitySet) ?[]const u8 {
         if (self.isAvailable(caps)) return null;
-        if (self.vendor_support == .absent) return "brak czujnika na tej platformie";
-        if (self.vendor_support == .unverified) return self.reason;
+        if (self.vendor_support == .absent) return i18n.t("brak czujnika na tej platformie");
+        if (self.vendor_support == .unverified) return i18n.t(self.reason);
         // verified, ale brakuje zdolności. Wypisujemy **pierwszą** brakującą
         // zdolność, bo to ona jest powodem, a nie „brak dostępu" w ogóle.
         for (self.descriptor.required_capabilities) |c| {
             if (!caps.has(c)) return capabilityName(c);
         }
-        return "brak wymaganych zdolności backendu";
+        return i18n.t("brak wymaganych zdolności backendu");
     }
 };
 
@@ -150,7 +151,7 @@ pub const metrics_available: []const Metric = &.{
             .label = "Package Energy",
         },
         .vendor_support = .unverified,
-        .reason = "energy counter: potwierdzone tylko dla Intel RAPL; brak potwierdzonego układu bitów dla AMD",
+        .reason = i18n.N("energy counter: potwierdzone tylko dla Intel RAPL; brak potwierdzonego układu bitów dla AMD"),
     },
     .{
         .descriptor = .{
@@ -164,7 +165,7 @@ pub const metrics_available: []const Metric = &.{
             .label = "Package Power",
         },
         .vendor_support = .unverified,
-        .reason = "package power: pochodzi z delty energii, której jeszcze nie potwierdziliśmy dla tego CPU",
+        .reason = i18n.N("package power: pochodzi z delty energii, której jeszcze nie potwierdziliśmy dla tego CPU"),
     },
     // --- temperatura ---------------------------------------------------------
     .{
@@ -179,7 +180,7 @@ pub const metrics_available: []const Metric = &.{
             .label = "Package Temp",
         },
         .vendor_support = .unverified,
-        .reason = "temperature: układ bitów nie jest potwierdzony w AMD PPR — nie zgadujemy przesunięć",
+        .reason = i18n.N("temperature: układ bitów nie jest potwierdzony w AMD PPR — nie zgadujemy przesunięć"),
     },
     // --- napięcie / prąd -----------------------------------------------------
     .{
@@ -195,7 +196,7 @@ pub const metrics_available: []const Metric = &.{
             .multi_instance = true,
         },
         .vendor_support = .unverified,
-        .reason = "voltage: rejestr napięcia nie ma potwierdzonej maski bitowej w źródłach, którymi dysponujemy",
+        .reason = i18n.N("voltage: rejestr napięcia nie ma potwierdzonej maski bitowej w źródłach, którymi dysponujemy"),
     },
     .{
         .descriptor = .{
@@ -210,7 +211,7 @@ pub const metrics_available: []const Metric = &.{
             .multi_instance = true,
         },
         .vendor_support = .unverified,
-        .reason = "current: brak potwierdzonego rejestru prądu dla tej generacji",
+        .reason = i18n.N("current: brak potwierdzonego rejestru prądu dla tej generacji"),
     },
     // --- obciążenie ----------------------------------------------------------
     .{
@@ -241,7 +242,7 @@ pub const metrics_available: []const Metric = &.{
             .multi_instance = true,
         },
         .vendor_support = .unverified,
-        .reason = "throttling: bity statusu nie są potwierdzone dla tej generacji",
+        .reason = i18n.N("throttling: bity statusu nie są potwierdzone dla tej generacji"),
     },
     .{
         .descriptor = .{
@@ -255,7 +256,7 @@ pub const metrics_available: []const Metric = &.{
             .label = "Status",
         },
         .vendor_support = .unverified,
-        .reason = "status: rejestr statusu pakietu nie jest potwierdzony",
+        .reason = i18n.N("status: rejestr statusu pakietu nie jest potwierdzony"),
     },
 };
 

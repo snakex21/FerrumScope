@@ -1357,6 +1357,21 @@ test "CPU page: cache w stylu „8 x 32 KB” i lista instrukcji z replay" {
 }
 
 test "GUI: komórki widoku uporządkowanego wskazują istniejące pola raportu" {
+    // Wiązanie nie może zależeć od języka: strony budowane w pl i w en.
+    const i18n = ferrum.i18n;
+    const loc_sources = i18n.embeddedSources(@import("locales_embedded"));
+    i18n.setSources(&loc_sources);
+    defer {
+        i18n.setSources(&.{});
+        i18n.setLocale("pl");
+    }
+    for ([_][]const u8{ "pl", "en" }) |code| {
+        i18n.setLocale(code);
+        try checkFormsBinding();
+    }
+}
+
+fn checkFormsBinding() !void {
     const forms = @import("gui/forms.zig");
     const st = try replayState();
     defer st.destroy();
@@ -1370,18 +1385,18 @@ test "GUI: komórki widoku uporządkowanego wskazują istniejące pola raportu" 
         for (t.bands) |band| for (band) |g| for (g.rows) |r| for (r) |c| {
             // Zegary/obciążenie istnieją tylko przy pomiarze na żywo; dyski mają
             // różne zestawy pól (HDD nie ma zużycia, ATA nie ma błędów nośnika).
-            if (std.mem.eql(u8, c.sect, "Zegary") or std.mem.eql(u8, c.sect, "Obciążenie") or
+            if (std.mem.startsWith(u8, c.sect, "Zegary") or std.mem.startsWith(u8, c.sect, "Obciążenie") or
                 std.mem.eql(u8, t.id, "storage") or std.mem.startsWith(u8, c.sect, "@Czujniki")) continue;
             if (forms.resolve(p, c, idx) == null) {
-                std.debug.print("brak pola: {s} / {s} / {s}\n", .{ t.id, c.sect, c.field });
+                std.debug.print("brak pola [{s}]: {s} / {s} / {s}\n", .{ ferrum.i18n.locale(), t.id, c.sect, c.field });
                 missing += 1;
             }
         };
     }
     try std.testing.expectEqual(@as(usize, 0), missing);
     const g = forms.findPage(pages, "graphics").?;
-    try std.testing.expectEqual(@as(usize, 1), forms.instanceCount(g, "GPU: "));
-    try std.testing.expect(forms.findLink(g, "Szukaj karty", forms.instanceName(g, "GPU: ", 0).?) != null);
+    try std.testing.expectEqual(@as(usize, 1), forms.instanceCount(g, "GPU: {name}"));
+    try std.testing.expect(forms.findLink(g, "gpu_search", forms.instanceName(g, "GPU: {name}", 0).?) != null);
 }
 
 test "GUI: każdy klucz logo z build.zig ma plik i jest poprawnym PNG" {
@@ -1412,4 +1427,6 @@ comptime {
     _ = @import("gui/image.zig");
     // Aktualizator: wersje, manifest, SHA256SUMS, podmiana z wycofaniem (bez sieci).
     _ = @import("update/update.zig");
+    // Katalogi tłumaczeń: kompletność, parametry, liczba mnoga, literały poza katalogiem.
+    _ = @import("i18n/catalog_test.zig");
 }

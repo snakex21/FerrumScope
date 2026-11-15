@@ -6,8 +6,16 @@
 //! modelu — różni je tylko układ.
 //!
 //! Sekcja zaczynająca się od `@` to sekcja **instancji** (moduł pamięci, karta
-//! graficzna, dysk): `@GPU: ` znaczy „n-ta sekcja z prefiksem `GPU: `”, gdzie
-//! n wybiera lista rozwijana zakładki.
+//! graficzna, dysk): `@GPU: {name}` znaczy „n-ta sekcja zbudowana z szablonu
+//! `GPU: {name}`”, gdzie n wybiera lista rozwijana zakładki.
+//!
+//! Tłumaczenia: wszystkie teksty w tablicy są identyfikatorami katalogu
+//! (tekst polski). Okno tłumaczy etykiety przy tworzeniu kontrolek, a
+//! wiązanie z polami raportu tłumaczy `sect`/`field`/`alt` tą samą funkcją
+//! `i18n.t`, którą strony budują tytuły i etykiety — dzięki temu wiązanie
+//! działa w każdym języku. Sekcje instancji porównuje się po stałym początku
+//! przetłumaczonego szablonu (`i18n.prefixOf`) i końcówce po ostatnim `}`.
+//! Przyciski odnośników wiążą się po stałym kluczu `report.Link.key`.
 //!
 //! Inspiracją jest wyłącznie *układ* znany z narzędzi typu CPU-Z/GPU-Z
 //! (zakładki, ramki grup, pola etykieta → wartość). Żadnych grafik, ikon ani
@@ -16,7 +24,7 @@
 pub const Cell = struct {
     /// Etykieta w oknie (krótka).
     label: []const u8,
-    /// Sekcja strony: dokładny prefiks tytułu albo `@prefiks` (instancja).
+    /// Tytuł sekcji strony (identyfikator katalogu) albo `@szablon` (instancja).
     sect: []const u8,
     /// Etykieta pola w stronie raportu.
     field: []const u8,
@@ -26,8 +34,8 @@ pub const Cell = struct {
     lines: u8 = 1,
     /// Szerokość etykiety (px przy 96 DPI); 0 = domyślna grupy / komórki.
     label_w: i32 = 0,
-    /// Przycisk obok pola: otwiera pierwszy odnośnik strony, którego etykieta
-    /// zaczyna się od `button_link` (i pasuje do bieżącej instancji).
+    /// Przycisk obok pola: otwiera pierwszy odnośnik strony o kluczu
+    /// `button_link` (`report.Link.key`), pasujący do bieżącej instancji.
     button: []const u8 = "",
     button_link: []const u8 = "",
     /// Dodatkowy przycisk „Przypnij link” (dokładna strona TechPowerUp ze schowka).
@@ -48,7 +56,8 @@ pub const Band = []const Group;
 
 pub const Selector = struct {
     label: []const u8,
-    /// Prefiks sekcji instancji na stronie (`GPU: `, `Dysk `, `Gniazdo `).
+    /// Szablon tytułu sekcji instancji (`GPU: {name}`, `Dysk {index}: {model}`,
+    /// `Gniazdo {slot}`) — ten sam identyfikator, którego używa strona.
     prefix: []const u8,
 };
 
@@ -72,8 +81,12 @@ pub const BadgeKind = enum { cpu, gpu };
 // ---------------------------------------------------------------------------
 
 const P = "Procesor";
-const Z = "Zegary";
+const Z = "Zegary (bez sterownika)";
 const C = "Pamięć podręczna";
+const GPU = "@GPU: {name}";
+const GS = "@Czujniki GPU: {name}";
+const SLOT = "@Gniazdo {slot}";
+const DISK = "@Dysk {index}: {model}";
 
 pub const tabs = [_]Tab{
     .{
@@ -83,7 +96,7 @@ pub const tabs = [_]Tab{
         .badge = .cpu,
         .bands = &.{
             &.{.{ .title = "Procesor", .rows = &.{
-                &.{.{ .label = "Nazwa", .sect = P, .field = "Nazwa", .button = "Wyszukaj", .button_link = "Szukaj CPU", .pin = true }},
+                &.{.{ .label = "Nazwa", .sect = P, .field = "Nazwa", .button = "Wyszukaj", .button_link = "cpu_search", .pin = true }},
                 &.{ .{ .label = "Nazwa kodowa", .sect = P, .field = "Nazwa kodowa" }, .{ .label = "Rewizja", .sect = P, .field = "Rewizja", .label_w = 56 } },
                 &.{ .{ .label = "Gniazdo", .sect = P, .field = "Gniazdo" }, .{ .label = "Technologia", .sect = P, .field = "Technologia", .label_w = 72 } },
                 &.{.{ .label = "Specyfikacja", .sect = P, .field = "Brand string" }},
@@ -98,7 +111,7 @@ pub const tabs = [_]Tab{
                     &.{.{ .label = "Mnożnik", .sect = Z, .field = "Mnożnik" }},
                     &.{.{ .label = "Zegar magistrali", .sect = Z, .field = "Zegar magistrali" }},
                     &.{.{ .label = "Zegar bazowy", .sect = Z, .field = "Zegar bazowy" }},
-                    &.{.{ .label = "Obciążenie", .sect = "Obciążenie", .field = "Całkowite" }},
+                    &.{.{ .label = "Obciążenie", .sect = "Obciążenie (bez sterownika)", .field = "Całkowite" }},
                 } },
                 .{ .title = "Pamięć podręczna", .label_w = 60, .rows = &.{
                     &.{.{ .label = "L1 Dane", .sect = C, .field = "L1 Data" }},
@@ -145,10 +158,10 @@ pub const tabs = [_]Tab{
                 &.{.{ .label = "Producent", .sect = "Płyta główna", .field = "Producent" }},
                 &.{ .{ .label = "Model", .sect = "Płyta główna", .field = "Model" }, .{ .label = "Rewizja", .sect = "Płyta główna", .field = "Rewizja", .label_w = 56 } },
                 &.{.{ .label = "Numer seryjny", .sect = "Płyta główna", .field = "Numer seryjny" }},
-                &.{.{ .label = "Gniazdo CPU", .sect = "Gniazdo procesora", .field = "Gniazdo" }},
+                &.{.{ .label = "Gniazdo CPU", .sect = "Gniazdo procesora (SMBIOS)", .field = "Gniazdo" }},
             } }},
             &.{.{ .title = "Chipset", .rows = &.{
-                &.{.{ .label = "Chipset", .sect = "Chipset", .field = "Chipset", .button = "Sterowniki", .button_link = "Sterowniki chipsetu" }},
+                &.{.{ .label = "Chipset", .sect = "Chipset", .field = "Chipset", .button = "Sterowniki", .button_link = "chipset_drivers" }},
                 &.{.{ .label = "Mostek hosta", .sect = "Chipset", .field = "Mostek hosta" }},
                 &.{.{ .label = "Mostek LPC", .sect = "Chipset", .field = "Mostek LPC / ISA" }},
                 &.{.{ .label = "SMBus", .sect = "Chipset", .field = "Kontroler SMBus" }},
@@ -164,7 +177,7 @@ pub const tabs = [_]Tab{
         .id = "memory",
         .title = "Pamięć",
         .page = "memory",
-        .selector = .{ .label = "Gniazdo", .prefix = "Gniazdo " },
+        .selector = .{ .label = "pamięć\x04Gniazdo", .prefix = SLOT[1..] },
         .bands = &.{
             &.{.{ .title = "Ogólne", .rows = &.{
                 &.{ .{ .label = "Typ", .sect = "Podsumowanie", .field = "Typ" }, .{ .label = "Rozmiar", .sect = "Podsumowanie", .field = "Rozmiar całkowity", .label_w = 56 } },
@@ -173,13 +186,13 @@ pub const tabs = [_]Tab{
                 &.{.{ .label = "Timingi", .sect = "Podsumowanie", .field = "Timingi (SPD)" }},
             } }},
             &.{.{ .title = "Moduł (wybrane gniazdo)", .rows = &.{
-                &.{ .{ .label = "Bank", .sect = "@Gniazdo ", .field = "Bank" }, .{ .label = "Rozmiar", .sect = "@Gniazdo ", .field = "Rozmiar", .alt = "Moduł", .label_w = 56 } },
-                &.{ .{ .label = "Typ", .sect = "@Gniazdo ", .field = "Typ" }, .{ .label = "Format", .sect = "@Gniazdo ", .field = "Format", .label_w = 56 } },
-                &.{ .{ .label = "Prędkość maks.", .sect = "@Gniazdo ", .field = "Prędkość maks." }, .{ .label = "Ustawiona", .sect = "@Gniazdo ", .field = "Prędkość skonfigurowana", .label_w = 64 } },
-                &.{.{ .label = "Producent", .sect = "@Gniazdo ", .field = "Producent" }},
-                &.{.{ .label = "Part number", .sect = "@Gniazdo ", .field = "Part number" }},
-                &.{.{ .label = "Numer seryjny", .sect = "@Gniazdo ", .field = "Numer seryjny" }},
-                &.{ .{ .label = "Ranki", .sect = "@Gniazdo ", .field = "Ranki" }, .{ .label = "Napięcie", .sect = "@Gniazdo ", .field = "Napięcie", .label_w = 56 } },
+                &.{ .{ .label = "Bank", .sect = SLOT, .field = "Bank" }, .{ .label = "Rozmiar", .sect = SLOT, .field = "Rozmiar", .alt = "Moduł", .label_w = 56 } },
+                &.{ .{ .label = "Typ", .sect = SLOT, .field = "Typ" }, .{ .label = "Format", .sect = SLOT, .field = "Format", .label_w = 56 } },
+                &.{ .{ .label = "Prędkość maks.", .sect = SLOT, .field = "Prędkość maks." }, .{ .label = "Ustawiona", .sect = SLOT, .field = "Prędkość skonfigurowana", .label_w = 64 } },
+                &.{.{ .label = "Producent", .sect = SLOT, .field = "Producent" }},
+                &.{.{ .label = "Part number", .sect = SLOT, .field = "Part number" }},
+                &.{.{ .label = "Numer seryjny", .sect = SLOT, .field = "Numer seryjny" }},
+                &.{ .{ .label = "Ranki", .sect = SLOT, .field = "Ranki" }, .{ .label = "Napięcie", .sect = SLOT, .field = "Napięcie", .label_w = 56 } },
             } }},
         },
     },
@@ -188,38 +201,38 @@ pub const tabs = [_]Tab{
         .title = "Grafika",
         .page = "graphics",
         .badge = .gpu,
-        .selector = .{ .label = "Karta", .prefix = "GPU: " },
+        .selector = .{ .label = "Karta", .prefix = GPU[1..] },
         .bands = &.{
             &.{.{ .title = "GPU", .rows = &.{
-                &.{.{ .label = "Nazwa", .sect = "@GPU: ", .field = "Nazwa (sterownik)", .button = "Wyszukaj", .button_link = "Szukaj karty", .pin = true }},
-                &.{.{ .label = "Układ", .sect = "@GPU: ", .field = "Układ GPU" }},
-                &.{.{ .label = "Karta", .sect = "@GPU: ", .field = "Karta", .alt = "Producent karty" }},
-                &.{ .{ .label = "ID urządzenia", .sect = "@GPU: ", .field = "Identyfikator" }, .{ .label = "Subsystem", .sect = "@GPU: ", .field = "Subsystem", .label_w = 64 } },
-                &.{ .{ .label = "Rewizja", .sect = "@GPU: ", .field = "Rewizja" }, .{ .label = "Adres PCI", .sect = "@GPU: ", .field = "Lokalizacja PCI", .label_w = 64 } },
-                &.{.{ .label = "Magistrala", .sect = "@GPU: ", .field = "Łącze PCIe" }},
+                &.{.{ .label = "Nazwa", .sect = GPU, .field = "Nazwa (sterownik)", .button = "Wyszukaj", .button_link = "gpu_search", .pin = true }},
+                &.{.{ .label = "Układ", .sect = GPU, .field = "Układ GPU" }},
+                &.{.{ .label = "Karta", .sect = GPU, .field = "Karta", .alt = "Producent karty" }},
+                &.{ .{ .label = "ID urządzenia", .sect = GPU, .field = "Identyfikator" }, .{ .label = "Subsystem", .sect = GPU, .field = "Subsystem", .label_w = 64 } },
+                &.{ .{ .label = "Rewizja", .sect = GPU, .field = "Rewizja" }, .{ .label = "Adres PCI", .sect = GPU, .field = "Lokalizacja PCI", .label_w = 64 } },
+                &.{.{ .label = "Magistrala", .sect = GPU, .field = "Łącze PCIe" }},
             } }},
             &.{
                 .{ .title = "Pamięć", .label_w = 96, .rows = &.{
-                    &.{.{ .label = "Dedykowana", .sect = "@GPU: ", .field = "Pamięć dedykowana" }},
-                    &.{.{ .label = "Współdzielona", .sect = "@GPU: ", .field = "Pamięć współdzielona" }},
-                    &.{.{ .label = "Typ", .sect = "@Czujniki GPU: ", .field = "Typ pamięci" }},
+                    &.{.{ .label = "Dedykowana", .sect = GPU, .field = "Pamięć dedykowana" }},
+                    &.{.{ .label = "Współdzielona", .sect = GPU, .field = "Pamięć współdzielona" }},
+                    &.{.{ .label = "Typ", .sect = GS, .field = "Typ pamięci" }},
                 } },
                 .{ .title = "Zegary i czujniki", .label_w = 84, .rows = &.{
-                    &.{.{ .label = "Zegar GPU", .sect = "@Czujniki GPU: ", .field = "Zegar GPU" }},
-                    &.{.{ .label = "Zegar pamięci", .sect = "@Czujniki GPU: ", .field = "Zegar pamięci" }},
-                    &.{.{ .label = "Temperatura", .sect = "@Czujniki GPU: ", .field = "Temperatura GPU" }},
+                    &.{.{ .label = "Zegar GPU", .sect = GS, .field = "Zegar GPU" }},
+                    &.{.{ .label = "Zegar pamięci", .sect = GS, .field = "Zegar pamięci" }},
+                    &.{.{ .label = "Temperatura", .sect = GS, .field = "Temperatura GPU" }},
                 } },
             },
             &.{
                 .{ .title = "Obciążenie", .label_w = 80, .rows = &.{
-                    &.{.{ .label = "Obciążenie", .sect = "@Czujniki GPU: ", .field = "Obciążenie GPU" }},
-                    &.{.{ .label = "Wentylator", .sect = "@Czujniki GPU: ", .field = "Wentylator" }},
-                    &.{.{ .label = "Pobór mocy", .sect = "@Czujniki GPU: ", .field = "Pobór mocy" }},
+                    &.{.{ .label = "Obciążenie", .sect = GS, .field = "Obciążenie GPU" }},
+                    &.{.{ .label = "Wentylator", .sect = GS, .field = "Wentylator" }},
+                    &.{.{ .label = "Pobór mocy", .sect = GS, .field = "Pobór mocy" }},
                 } },
                 .{ .title = "Sterownik", .label_w = 84, .rows = &.{
-                    &.{.{ .label = "Wersja", .sect = "@GPU: ", .field = "Sterownik" }},
-                    &.{.{ .label = "Data", .sect = "@GPU: ", .field = "Data sterownika" }},
-                    &.{.{ .label = "Dostawca", .sect = "@GPU: ", .field = "Dostawca sterownika", .button = "Pobierz", .button_link = "Sterowniki" }},
+                    &.{.{ .label = "Wersja", .sect = GPU, .field = "Sterownik" }},
+                    &.{.{ .label = "Data", .sect = GPU, .field = "Data sterownika" }},
+                    &.{.{ .label = "Dostawca", .sect = GPU, .field = "Dostawca sterownika", .button = "Pobierz", .button_link = "drivers" }},
                 } },
             },
         },
@@ -228,21 +241,21 @@ pub const tabs = [_]Tab{
         .id = "storage",
         .title = "Dyski",
         .page = "storage",
-        .selector = .{ .label = "Dysk", .prefix = "Dysk " },
+        .selector = .{ .label = "Dysk", .prefix = DISK[1..] },
         .bands = &.{
             &.{.{ .title = "Urządzenie", .rows = &.{
-                &.{.{ .label = "Model", .sect = "@Dysk ", .field = "Model" }},
-                &.{ .{ .label = "Firmware", .sect = "@Dysk ", .field = "Firmware" }, .{ .label = "Magistrala", .sect = "@Dysk ", .field = "Magistrala", .label_w = 68 } },
-                &.{ .{ .label = "Pojemność", .sect = "@Dysk ", .field = "Pojemność" }, .{ .label = "Rodzaj", .sect = "@Dysk ", .field = "Rodzaj", .label_w = 68 } },
-                &.{.{ .label = "Numer seryjny", .sect = "@Dysk ", .field = "Numer seryjny" }},
+                &.{.{ .label = "Model", .sect = DISK, .field = "Model" }},
+                &.{ .{ .label = "Firmware", .sect = DISK, .field = "Firmware" }, .{ .label = "Magistrala", .sect = DISK, .field = "Magistrala", .label_w = 68 } },
+                &.{ .{ .label = "Pojemność", .sect = DISK, .field = "Pojemność" }, .{ .label = "Rodzaj", .sect = DISK, .field = "Rodzaj", .label_w = 68 } },
+                &.{.{ .label = "Numer seryjny", .sect = DISK, .field = "Numer seryjny" }},
             } }},
             &.{.{ .title = "Zdrowie (SMART / NVMe)", .rows = &.{
-                &.{.{ .label = "Stan", .sect = "@Dysk ", .field = "Stan zdrowia" }},
-                &.{ .{ .label = "Temperatura", .sect = "@Dysk ", .field = "Temperatura" }, .{ .label = "Zużycie", .sect = "@Dysk ", .field = "Zużycie", .label_w = 68 } },
-                &.{ .{ .label = "Czas pracy", .sect = "@Dysk ", .field = "Czas pracy" }, .{ .label = "Uruchomień", .sect = "@Dysk ", .field = "Liczba uruchomień", .label_w = 68 } },
-                &.{ .{ .label = "Zapisano", .sect = "@Dysk ", .field = "Zapisano" }, .{ .label = "Odczytano", .sect = "@Dysk ", .field = "Odczytano", .label_w = 68 } },
-                &.{ .{ .label = "Realokowane", .sect = "@Dysk ", .field = "Realokowane sektory" }, .{ .label = "Oczekujące", .sect = "@Dysk ", .field = "Sektory oczekujące", .label_w = 68 } },
-                &.{ .{ .label = "Nienaprawialne", .sect = "@Dysk ", .field = "Nienaprawialne" }, .{ .label = "Błędy nośnika", .sect = "@Dysk ", .field = "Błędy nośnika", .label_w = 84 } },
+                &.{.{ .label = "Stan", .sect = DISK, .field = "Stan zdrowia" }},
+                &.{ .{ .label = "Temperatura", .sect = DISK, .field = "Temperatura" }, .{ .label = "Zużycie", .sect = DISK, .field = "Zużycie", .label_w = 68 } },
+                &.{ .{ .label = "Czas pracy", .sect = DISK, .field = "Czas pracy" }, .{ .label = "Uruchomień", .sect = DISK, .field = "Liczba uruchomień", .label_w = 68 } },
+                &.{ .{ .label = "Zapisano", .sect = DISK, .field = "Zapisano" }, .{ .label = "Odczytano", .sect = DISK, .field = "Odczytano", .label_w = 68 } },
+                &.{ .{ .label = "Realokowane", .sect = DISK, .field = "Realokowane sektory" }, .{ .label = "Oczekujące", .sect = DISK, .field = "Sektory oczekujące", .label_w = 68 } },
+                &.{ .{ .label = "Nienaprawialne", .sect = DISK, .field = "Nienaprawialne" }, .{ .label = "Błędy nośnika", .sect = DISK, .field = "Błędy nośnika", .label_w = 84 } },
             } }},
         },
     },
@@ -281,6 +294,7 @@ test "forms: identyfikatory zakładek są unikalne, a komórki mają etykiety" {
 // ---------------------------------------------------------------------------
 
 const report = @import("../sys/report.zig");
+const i18n = @import("../i18n/i18n.zig");
 
 pub fn findPage(pages: []const report.Page, id: []const u8) ?*const report.Page {
     for (pages) |*p| if (eql(p.id, id)) return p;
@@ -291,21 +305,58 @@ fn startsWith(s: []const u8, prefix: []const u8) bool {
     return s.len >= prefix.len and eql(s[0..prefix.len], prefix);
 }
 
-/// Liczba sekcji instancji (np. modułów pamięci) na stronie.
-pub fn instanceCount(p: *const report.Page, prefix: []const u8) usize {
+fn endsWith(s: []const u8, suffix: []const u8) bool {
+    return s.len >= suffix.len and eql(s[s.len - suffix.len ..], suffix);
+}
+
+/// Stały początek i koniec przetłumaczonego szablonu instancji
+/// (`"GPU: {name}"` → `"GPU: "`, `""`).
+const Affix = struct { pre: []const u8, post: []const u8 };
+
+fn affixOf(template_id: []const u8) Affix {
+    const s = i18n.t(template_id);
+    const a = indexOfByte(s, '{') orelse return .{ .pre = s, .post = "" };
+    const z = lastIndexOfByte(s, '}') orelse return .{ .pre = s[0..a], .post = "" };
+    return .{ .pre = s[0..a], .post = s[z + 1 ..] };
+}
+
+fn indexOfByte(s: []const u8, c: u8) ?usize {
+    for (s, 0..) |x, i| if (x == c) return i;
+    return null;
+}
+
+fn lastIndexOfByte(s: []const u8, c: u8) ?usize {
+    var i = s.len;
+    while (i > 0) {
+        i -= 1;
+        if (s[i] == c) return i;
+    }
+    return null;
+}
+
+fn isInstance(title: []const u8, af: Affix) bool {
+    return title.len >= af.pre.len + af.post.len and startsWith(title, af.pre) and endsWith(title, af.post);
+}
+
+/// Liczba sekcji instancji (np. modułów pamięci) na stronie. `template` =
+/// identyfikator szablonu tytułu (np. `"GPU: {name}"`).
+pub fn instanceCount(p: *const report.Page, template: []const u8) usize {
+    const af = affixOf(template);
     var n: usize = 0;
     for (p.sections.items) |s| {
-        if (startsWith(s.title, prefix)) n += 1;
+        if (isInstance(s.title, af)) n += 1;
     }
     return n;
 }
 
-/// Tytuł n-tej sekcji instancji bez prefiksu (do listy rozwijanej).
-pub fn instanceName(p: *const report.Page, prefix: []const u8, index: usize) ?[]const u8 {
+/// Zmienna część tytułu n-tej sekcji instancji (do listy rozwijanej i do
+/// dopasowania `Link.scope`).
+pub fn instanceName(p: *const report.Page, template: []const u8, index: usize) ?[]const u8 {
+    const af = affixOf(template);
     var n: usize = 0;
     for (p.sections.items) |s| {
-        if (!startsWith(s.title, prefix)) continue;
-        if (n == index) return s.title[prefix.len..];
+        if (!isInstance(s.title, af)) continue;
+        if (n == index) return s.title[af.pre.len .. s.title.len - af.post.len];
         n += 1;
     }
     return null;
@@ -313,17 +364,18 @@ pub fn instanceName(p: *const report.Page, prefix: []const u8, index: usize) ?[]
 
 fn section(p: *const report.Page, sect: []const u8, index: usize) ?*const report.Section {
     if (sect.len > 0 and sect[0] == '@') {
-        const prefix = sect[1..];
+        const af = affixOf(sect[1..]);
         var n: usize = 0;
         for (p.sections.items) |*s| {
-            if (!startsWith(s.title, prefix)) continue;
+            if (!isInstance(s.title, af)) continue;
             if (n == index) return s;
             n += 1;
         }
         return null;
     }
+    const title = i18n.t(sect);
     for (p.sections.items) |*s| {
-        if (startsWith(s.title, sect)) return s;
+        if (eql(s.title, title)) return s;
     }
     return null;
 }
@@ -331,18 +383,20 @@ fn section(p: *const report.Page, sect: []const u8, index: usize) ?*const report
 /// Pole raportu dla komórki formularza; `null` = strona nie ma takiego pola.
 pub fn resolve(p: *const report.Page, c: Cell, index: usize) ?*const report.Field {
     const s = section(p, c.sect, index) orelse return null;
-    for (s.fields.items) |*f| if (eql(f.label, c.field)) return f;
+    const field = i18n.t(c.field);
+    for (s.fields.items) |*f| if (eql(f.label, field)) return f;
     if (c.alt.len > 0) {
-        for (s.fields.items) |*f| if (eql(f.label, c.alt)) return f;
+        const alt = i18n.t(c.alt);
+        for (s.fields.items) |*f| if (eql(f.label, alt)) return f;
     }
     return null;
 }
 
-/// Pierwszy odnośnik strony o etykiecie zaczynającej się od `prefix`,
-/// pasujący do instancji `scope` (pusty scope odnośnika = cała strona).
-pub fn findLink(p: *const report.Page, prefix: []const u8, scope: []const u8) ?*const report.Link {
+/// Pierwszy odnośnik strony o kluczu `key` (`report.Link.key`), pasujący do
+/// instancji `scope` (pusty scope odnośnika = cała strona).
+pub fn findLink(p: *const report.Page, key: []const u8, scope: []const u8) ?*const report.Link {
     for (p.links.items) |*l| {
-        if (!startsWith(l.label, prefix)) continue;
+        if (!eql(l.key, key)) continue;
         if (l.scope.len > 0 and scope.len > 0 and !eql(l.scope, scope)) continue;
         return l;
     }

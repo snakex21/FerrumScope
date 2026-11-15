@@ -13,6 +13,7 @@ const isa = @import("../decode/isa_x86.zig");
 const report = @import("report.zig");
 const links = @import("links.zig");
 const lookup = @import("lookup.zig");
+const i18n = @import("../i18n/i18n.zig");
 
 /// Pomiary na żywo (bez sterownika). Wszystkie pola opcjonalne: replay ich nie ma.
 pub const LiveCpu = struct {
@@ -27,7 +28,9 @@ pub const LiveCpu = struct {
     pdh_ok: bool = false,
     /// Częstotliwość efektywna z APERF/MPERF (sterownik). `null` = brak.
     msr_effective_mhz: ?f64 = null,
-    msr_reason: []const u8 = "sterownik FerrumScopeMsr nie jest załadowany",
+    /// Powód braku odczytu MSR. Pusty = domyślny („sterownik … nie jest
+    /// załadowany”), tłumaczony przy budowie strony.
+    msr_reason: []const u8 = "",
 };
 
 pub const CpuInput = struct {
@@ -36,8 +39,9 @@ pub const CpuInput = struct {
     outcome: decoder.DecodeOutcome,
     hwdb_entries: usize = 0,
     hwdb_revision: u32 = 0,
-    /// Opis źródła danych (np. „CPUID na żywo” albo ścieżka pliku replay).
-    origin: []const u8 = "CPUID na żywo",
+    /// Opis źródła danych (ścieżka pliku replay). Pusty = „CPUID na żywo”
+    /// (tłumaczone przy budowie strony).
+    origin: []const u8 = "",
     live: ?LiveCpu = null,
     /// Zegar zewnętrzny (magistrali) z SMBIOS typ 4, offset 12h. `null` = brak.
     bus_mhz: ?u32 = null,
@@ -71,32 +75,50 @@ pub fn cacheLabel(b: *report.Builder, c: model.CacheInfo, count: u32) []const u8
     return b.fmt("{d} x {d} KB", .{ n, k });
 }
 
+/// Nazwa poziomu cache (etykieta pola; GUI wiąże po `i18n.t("L1 Data")` itd.).
 fn cacheName(c: model.CacheInfo) []const u8 {
     return switch (c.level) {
         1 => switch (c.kind) {
-            .data => "L1 Data",
-            .instruction => "L1 Instruction",
-            .unified => "L1",
+            .data => i18n.t("L1 Data"),
+            .instruction => i18n.t("L1 Instruction"),
+            .unified => i18n.t("L1"),
         },
-        2 => "L2",
-        3 => "L3",
-        4 => "L4",
-        else => "Cache",
+        2 => i18n.t("L2"),
+        3 => i18n.t("L3"),
+        4 => i18n.t("L4"),
+        else => i18n.t("Cache"),
+    };
+}
+
+/// Etykieta opisu cache. Pełne identyfikatory (nie szablon), bo formularz GUI
+/// wiąże komórki przez `i18n.t("L1 Data — opis")` — tłumaczenie etykiety
+/// strony musi być identyczne w każdym języku.
+fn cacheDescName(c: model.CacheInfo) []const u8 {
+    return switch (c.level) {
+        1 => switch (c.kind) {
+            .data => i18n.t("L1 Data — opis"),
+            .instruction => i18n.t("L1 Instruction — opis"),
+            .unified => i18n.t("L1 — opis"),
+        },
+        2 => i18n.t("L2 — opis"),
+        3 => i18n.t("L3 — opis"),
+        4 => i18n.t("L4 — opis"),
+        else => i18n.t("Cache — opis"),
     };
 }
 
 pub fn srcLabel(s: model.FieldSource) []const u8 {
     return switch (s) {
         .cpuid => "CPUID",
-        .hwdb_exact => "HWDB (dokładny wpis)",
-        .hwdb_pattern => "HWDB (zakres modeli)",
-        .hwdb_family => "HWDB (cała rodzina)",
+        .hwdb_exact => i18n.t("HWDB (dokładny wpis)"),
+        .hwdb_pattern => i18n.t("HWDB (zakres modeli)"),
+        .hwdb_family => i18n.t("HWDB (cała rodzina)"),
         .hwdb => "HWDB",
-        .brand_derived => "brand string (reguła HWDB)",
-        .generated => "wygenerowane z sygnatury",
+        .brand_derived => i18n.t("brand string (reguła HWDB)"),
+        .generated => i18n.t("wygenerowane z sygnatury"),
         .smbios => "SMBIOS",
-        .platform => "platforma",
-        .empirical => "obserwacja referencyjna",
+        .platform => i18n.t("platforma"),
+        .empirical => i18n.t("obserwacja referencyjna"),
         .unknown, .none => "—",
     };
 }
@@ -120,138 +142,140 @@ fn optField(b: *report.Builder, label: []const u8, v: ?[]const u8, src: model.Fi
 }
 
 pub fn build(arena: std.mem.Allocator, in: CpuInput) report.Page {
-    var page: report.Page = .{ .id = "cpu", .title = "CPU" };
+    var page: report.Page = .{ .id = "cpu", .title = "" };
     var b = report.Builder.init(arena, &page);
+    page.title = b.t("CPU");
+    const origin = if (in.origin.len > 0) in.origin else b.t("CPUID na żywo");
     const info = in.info;
     const raw_info = in.raw;
 
     var nb: [128]u8 = undefined;
     page.headline = b.dup(info.displayName(&nb));
-    page.summary = b.fmt("Źródło: {s}. HWDB: {d} wpisów, rewizja {d}.", .{ in.origin, in.hwdb_entries, in.hwdb_revision });
+    page.summary = b.tp("Źródło: {origin}. HWDB: {n} wpisów, rewizja {revision}.", in.hwdb_entries, .{ .origin = origin, .revision = in.hwdb_revision });
 
     // --- identyfikacja -----------------------------------------------------
-    b.section("Procesor");
+    b.section(b.t("Procesor"));
     b.add(.{
-        .label = "Nazwa",
+        .label = b.t("Nazwa"),
         .value = page.headline,
         .source = srcLabel(info.display_name_source),
         .confidence = if (info.match.isReliable()) .high else .medium,
     });
-    b.add(.{ .label = "Producent", .value = info.vendor.toSlice(), .source = "CPUID.0 EBX/EDX/ECX" });
+    b.add(.{ .label = b.t("Producent"), .value = info.vendor.toSlice(), .source = "CPUID.0 EBX/EDX/ECX" });
     if (info.brand_valid) {
-        b.add(.{ .label = "Brand string", .value = b.dup(info.brandSlice()), .source = "CPUID 0x80000002..4" });
+        b.add(.{ .label = b.t("Brand string"), .value = b.dup(info.brandSlice()), .source = "CPUID 0x80000002..4" });
     } else {
-        b.add(.{ .label = "Brand string", .value = "—", .state = .unavailable, .source = "brak lub niewiarygodny w CPUID", .confidence = .unknown });
+        b.add(.{ .label = b.t("Brand string"), .value = "—", .state = .unavailable, .source = b.t("brak lub niewiarygodny w CPUID"), .confidence = .unknown });
     }
-    optField(&b, "Nazwa kodowa", info.codename, info.codename_source, "brak wpisu w HWDB");
-    optField(&b, "Mikroarchitektura", info.microarchitecture, info.microarchitecture_source, "brak wpisu w HWDB");
+    optField(&b, b.t("Nazwa kodowa"), info.codename, info.codename_source, b.t("brak wpisu w HWDB"));
+    optField(&b, b.t("Mikroarchitektura"), info.microarchitecture, info.microarchitecture_source, b.t("brak wpisu w HWDB"));
     if (info.socket_name) |s| {
-        b.add(.{ .label = "Gniazdo", .value = s, .source = srcLabel(info.socket_source), .confidence = info.socket_confidence });
+        b.add(.{ .label = b.t("Gniazdo"), .value = s, .source = srcLabel(info.socket_source), .confidence = info.socket_confidence });
     } else {
-        b.add(.{ .label = "Gniazdo", .value = "—", .state = .unavailable, .source = "brak wpisu w HWDB (gniazda nie zgadujemy; patrz Płyta główna → SMBIOS)", .confidence = .unknown });
+        b.add(.{ .label = b.t("Gniazdo"), .value = "—", .state = .unavailable, .source = b.t("brak wpisu w HWDB (gniazda nie zgadujemy; patrz Płyta główna → SMBIOS)"), .confidence = .unknown });
     }
     if (info.stepping_name) |s| {
         b.add(.{
-            .label = "Rewizja",
+            .label = b.t("Rewizja"),
             .value = s,
             .source = b.fmt("{s} ({s})", .{ srcLabel(info.stepping_name_source), info.stepping_name_provenance.source_type.toSlice() }),
             .confidence = info.stepping_name_provenance.confidence,
             .note = info.stepping_name_provenance.notes orelse "",
         });
     }
-    if (info.variant) |v| b.add(.{ .label = "Wariant", .value = v, .source = srcLabel(info.variant_source), .confidence = confOf(info.variant_source) });
-    b.add(.{ .label = "Technologia", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "proces technologiczny: brak w HWDB (nie zgadujemy z nazwy)" });
+    if (info.variant) |v| b.add(.{ .label = b.t("Wariant"), .value = v, .source = srcLabel(info.variant_source), .confidence = confOf(info.variant_source) });
+    b.add(.{ .label = b.t("Technologia"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.t("proces technologiczny: brak w HWDB (nie zgadujemy z nazwy)") });
     const sig = info.signature;
-    b.add(.{ .label = "Rodzina", .value = b.fmt("{X}", .{sig.familyField()}), .raw = b.fmt("0x{X}", .{sig.familyField()}), .source = "CPUID.1 EAX[11:8]" });
-    b.add(.{ .label = "Model", .value = b.fmt("{X}", .{sig.modelField()}), .raw = b.fmt("0x{X}", .{sig.modelField()}), .source = "CPUID.1 EAX[7:4]" });
-    b.add(.{ .label = "Stepping", .value = b.fmt("{X}", .{info.stepping}), .source = "CPUID.1 EAX[3:0]" });
-    b.add(.{ .label = "Rodzina rozsz.", .value = b.fmt("{X}", .{info.display_family}), .raw = b.fmt("ext_family=0x{X}", .{sig.extFamily()}), .source = "CPUID.1 EAX[27:20] + [11:8] (display family)" });
-    b.add(.{ .label = "Model rozsz.", .value = b.fmt("{X}", .{info.display_model}), .raw = b.fmt("ext_model=0x{X}", .{sig.extModel()}), .source = "CPUID.1 EAX[19:16]:[7:4] (display model)" });
+    b.add(.{ .label = b.t("Rodzina"), .value = b.fmt("{X}", .{sig.familyField()}), .raw = b.fmt("0x{X}", .{sig.familyField()}), .source = "CPUID.1 EAX[11:8]" });
+    b.add(.{ .label = b.t("Model"), .value = b.fmt("{X}", .{sig.modelField()}), .raw = b.fmt("0x{X}", .{sig.modelField()}), .source = "CPUID.1 EAX[7:4]" });
+    b.add(.{ .label = b.t("Stepping"), .value = b.fmt("{X}", .{info.stepping}), .source = "CPUID.1 EAX[3:0]" });
+    b.add(.{ .label = b.t("Rodzina rozsz."), .value = b.fmt("{X}", .{info.display_family}), .raw = b.fmt("ext_family=0x{X}", .{sig.extFamily()}), .source = "CPUID.1 EAX[27:20] + [11:8] (display family)" });
+    b.add(.{ .label = b.t("Model rozsz."), .value = b.fmt("{X}", .{info.display_model}), .raw = b.fmt("ext_model=0x{X}", .{sig.extModel()}), .source = "CPUID.1 EAX[19:16]:[7:4] (display model)" });
     b.add(.{
-        .label = "Family / Model / Stepping",
+        .label = b.t("Family / Model / Stepping"),
         .value = b.fmt("{X} / {X} / {X}", .{ info.display_family, info.display_model, info.stepping }),
         .raw = b.fmt("0x{X:0>8}", .{info.signature.eax}),
-        .source = "CPUID.1 EAX (display family/model wg SDM/APM)",
+        .source = b.t("CPUID.1 EAX (display family/model wg SDM/APM)"),
     });
 
     // --- zegary i obciążenie ------------------------------------------------
-    b.section("Zegary (bez sterownika)");
+    b.section(b.t("Zegary (bez sterownika)"));
     if (in.live) |lv| {
         if (lv.est_avg_mhz) |avg| {
             b.add(.{
-                .label = "Zegar rdzeni (średnio)",
+                .label = b.t("Zegar rdzeni (średnio)"),
                 .value = b.fmt("{d:.0} MHz", .{avg}),
                 .state = .estimate,
                 .confidence = .medium,
-                .source = "PDH \\Processor Information(*)\\% Processor Performance × zegar bazowy",
-                .note = "oszacowanie systemu (jak Menedżer zadań), nie odczyt APERF/MPERF",
+                .source = b.t("PDH \\Processor Information(*)\\% Processor Performance × zegar bazowy"),
+                .note = b.t("oszacowanie systemu (jak Menedżer zadań), nie odczyt APERF/MPERF"),
             });
-            if (lv.est_max_mhz) |mx| b.add(.{ .label = "Najszybszy rdzeń", .value = b.fmt("{d:.0} MHz", .{mx}), .state = .estimate, .confidence = .medium, .source = "jw., maksimum po procesorach logicznych" });
+            if (lv.est_max_mhz) |mx| b.add(.{ .label = b.t("Najszybszy rdzeń"), .value = b.fmt("{d:.0} MHz", .{mx}), .state = .estimate, .confidence = .medium, .source = b.t("jw., maksimum po procesorach logicznych") });
         } else {
-            b.add(.{ .label = "Zegar rdzeni (średnio)", .value = "—", .state = .unavailable, .confidence = .unknown, .source = if (lv.pdh_ok) "licznik PDH bez danych (pierwsza próbka)" else "licznik PDH % Processor Performance niedostępny" });
+            b.add(.{ .label = b.t("Zegar rdzeni (średnio)"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = if (lv.pdh_ok) b.t("licznik PDH bez danych (pierwsza próbka)") else b.t("licznik PDH % Processor Performance niedostępny") });
         }
         if (in.bus_mhz) |bus| {
-            b.add(.{ .label = "Zegar magistrali", .value = b.fmt("{d} MHz", .{bus}), .source = "SMBIOS typ 4, offset 12h (External Clock)", .confidence = .medium, .note = "wartość firmware, nie pomiar" });
+            b.add(.{ .label = b.t("Zegar magistrali"), .value = b.fmt("{d} MHz", .{bus}), .source = "SMBIOS typ 4, offset 12h (External Clock)", .confidence = .medium, .note = b.t("wartość firmware, nie pomiar") });
             if (lv.est_avg_mhz) |avg| {
                 const mul = avg / @as(f32, @floatFromInt(@max(bus, 1)));
-                b.add(.{ .label = "Mnożnik", .value = b.fmt("x {d:.1}", .{mul}), .state = .estimate, .confidence = .low, .source = "zegar rdzeni (oszacowanie) / zegar magistrali (SMBIOS)" });
-            } else b.add(.{ .label = "Mnożnik", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "brak oszacowania zegara rdzeni" });
+                b.add(.{ .label = b.t("Mnożnik"), .value = b.fmt("x {d:.1}", .{mul}), .state = .estimate, .confidence = .low, .source = b.t("zegar rdzeni (oszacowanie) / zegar magistrali (SMBIOS)") });
+            } else b.add(.{ .label = b.t("Mnożnik"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.t("brak oszacowania zegara rdzeni") });
         } else {
-            b.add(.{ .label = "Zegar magistrali", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "brak SMBIOS typ 4 External Clock" });
-            b.add(.{ .label = "Mnożnik", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "brak zegara magistrali" });
+            b.add(.{ .label = b.t("Zegar magistrali"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.t("brak SMBIOS typ 4 External Clock") });
+            b.add(.{ .label = b.t("Mnożnik"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.t("brak zegara magistrali") });
         }
-        if (lv.base_mhz) |m| b.add(.{ .label = "Zegar bazowy", .value = b.fmt("{d} MHz", .{m}), .source = "CallNtPowerInformation(ProcessorInformation).MaxMhz (ACPI)", .confidence = .medium });
-        if (lv.reported_mhz) |m| b.add(.{ .label = "Zegar zgłaszany przez system", .value = b.fmt("{d} MHz", .{m}), .source = "CallNtPowerInformation(ProcessorInformation).CurrentMhz", .confidence = .low, .note = "na nowszych Windows zwykle równy bazowemu" });
+        if (lv.base_mhz) |m| b.add(.{ .label = b.t("Zegar bazowy"), .value = b.fmt("{d} MHz", .{m}), .source = "CallNtPowerInformation(ProcessorInformation).MaxMhz (ACPI)", .confidence = .medium });
+        if (lv.reported_mhz) |m| b.add(.{ .label = b.t("Zegar zgłaszany przez system"), .value = b.fmt("{d} MHz", .{m}), .source = "CallNtPowerInformation(ProcessorInformation).CurrentMhz", .confidence = .low, .note = b.t("na nowszych Windows zwykle równy bazowemu") });
         if (lv.msr_effective_mhz) |f| {
-            b.add(.{ .label = "Zegar efektywny (APERF/MPERF)", .value = b.fmt("{d:.0} MHz", .{f}), .source = "MSR 0xE7/0xE8 przez FerrumScopeMsr", .confidence = .medium });
+            b.add(.{ .label = b.t("Zegar efektywny (APERF/MPERF)"), .value = b.fmt("{d:.0} MHz", .{f}), .source = b.t("MSR 0xE7/0xE8 przez FerrumScopeMsr"), .confidence = .medium });
         } else {
-            b.add(.{ .label = "Zegar efektywny (APERF/MPERF)", .value = "—", .state = .requires_driver, .confidence = .unknown, .source = lv.msr_reason });
+            b.add(.{ .label = b.t("Zegar efektywny (APERF/MPERF)"), .value = "—", .state = .requires_driver, .confidence = .unknown, .source = if (lv.msr_reason.len > 0) lv.msr_reason else b.t("sterownik FerrumScopeMsr nie jest załadowany") });
         }
 
-        b.section("Obciążenie (bez sterownika)");
+        b.section(b.t("Obciążenie (bez sterownika)"));
         if (lv.total_load) |t| {
-            b.add(.{ .label = "Całkowite", .value = b.fmt("{d:.1} %", .{t}), .source = "NtQuerySystemInformation(SystemProcessorPerformanceInformation), Δ czasów idle/kernel/user" });
+            b.add(.{ .label = b.t("Całkowite"), .value = b.fmt("{d:.1} %", .{t}), .source = b.t("NtQuerySystemInformation(SystemProcessorPerformanceInformation), Δ czasów idle/kernel/user") });
         } else {
-            b.add(.{ .label = "Całkowite", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "potrzebne dwie próbki (odświeżenie za 1 s)" });
+            b.add(.{ .label = b.t("Całkowite"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.t("potrzebne dwie próbki (odświeżenie za 1 s)") });
         }
         for (0..lv.cpus) |i| {
             const l: ?f32 = if (i < lv.load.len) lv.load[i] else null;
             const f: ?f32 = if (i < lv.est_mhz.len) lv.est_mhz[i] else null;
-            const label = b.fmt("CPU {d}", .{i});
+            const label = b.tf("CPU {index}", .{ .index = i });
             if (l) |pct| {
                 const v = if (f) |mhz| b.fmt("{d:>5.1} %   ~{d:.0} MHz", .{ pct, mhz }) else b.fmt("{d:.1} %", .{pct});
-                b.add(.{ .label = label, .value = v, .state = if (f != null) .estimate else .ok, .confidence = if (f != null) .medium else .high, .source = "jw. (per procesor logiczny)" });
+                b.add(.{ .label = label, .value = v, .state = if (f != null) .estimate else .ok, .confidence = if (f != null) .medium else .high, .source = b.t("jw. (per procesor logiczny)") });
             } else {
-                b.add(.{ .label = label, .value = "—", .state = .unavailable, .confidence = .unknown, .source = "brak drugiej próbki" });
+                b.add(.{ .label = label, .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.t("brak drugiej próbki") });
             }
         }
     } else {
-        b.add(.{ .label = "Zegary i obciążenie", .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.fmt("brak pomiaru na żywo ({s})", .{in.origin}) });
+        b.add(.{ .label = b.t("Zegary i obciążenie"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.tf("brak pomiaru na żywo ({origin})", .{ .origin = origin }) });
     }
 
     // --- topologia -----------------------------------------------------------
-    b.section("Topologia");
+    b.section(b.t("Topologia"));
     const topo = info.topology_source.toSlice();
     if (info.cores_physical > 0) {
-        b.add(.{ .label = "Rdzenie", .value = b.fmt("{d}", .{info.cores_physical}), .source = b.fmt("topologia: {s}", .{topo}), .confidence = if (info.topology_confident) .high else .low });
-    } else b.add(.{ .label = "Rdzenie", .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.fmt("topologia nieustalona ({s})", .{topo}) });
+        b.add(.{ .label = b.t("Rdzenie"), .value = b.fmt("{d}", .{info.cores_physical}), .source = b.tf("topologia: {source}", .{ .source = topo }), .confidence = if (info.topology_confident) .high else .low });
+    } else b.add(.{ .label = b.t("Rdzenie"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.tf("topologia nieustalona ({source})", .{ .source = topo }) });
     if (info.threads_logical > 0) {
-        b.add(.{ .label = "Wątki", .value = b.fmt("{d}", .{info.threads_logical}), .source = b.fmt("topologia: {s}", .{topo}) });
-    } else b.add(.{ .label = "Wątki", .value = "—", .state = .unavailable, .confidence = .unknown, .source = topo });
-    b.add(.{ .label = "SMT", .value = if (info.smt) "tak" else "nie", .source = "CPUID" });
-    if (info.packages > 0) b.add(.{ .label = "Gniazda (pakiety)", .value = b.fmt("{d}", .{info.packages}), .source = "identyfikatory APIC (pomiar)" });
+        b.add(.{ .label = b.t("Wątki"), .value = b.fmt("{d}", .{info.threads_logical}), .source = b.tf("topologia: {source}", .{ .source = topo }) });
+    } else b.add(.{ .label = b.t("Wątki"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = topo });
+    b.add(.{ .label = b.t("SMT"), .value = if (info.smt) b.t("tak") else b.t("nie"), .source = "CPUID" });
+    if (info.packages > 0) b.add(.{ .label = b.t("Gniazda (pakiety)"), .value = b.fmt("{d}", .{info.packages}), .source = b.t("identyfikatory APIC (pomiar)") });
     const classes = info.coreClassSlice();
     if (info.hybrid or classes.len > 1) {
         for (classes) |c| {
-            const v = if (c.name.len > 0) b.fmt("{d} x {s}", .{ c.cores, c.name }) else b.fmt("{d} x klasa 0x{X:0>2}", .{ c.cores, c.value });
-            b.add(.{ .label = "Klasa rdzeni", .value = v, .source = "CPUID 0x1A / 0x1F" });
+            const v = if (c.name.len > 0) b.fmt("{d} x {s}", .{ c.cores, c.name }) else b.tf("{cores} x klasa {class}", .{ .cores = c.cores, .class = b.fmt("0x{X:0>2}", .{c.value}) });
+            b.add(.{ .label = b.t("Klasa rdzeni"), .value = v, .source = "CPUID 0x1A / 0x1F" });
         }
     }
 
     // --- cache ---------------------------------------------------------------
-    b.section("Pamięć podręczna");
+    b.section(b.t("Pamięć podręczna"));
     if (info.cacheSlice().len == 0) {
-        b.add(.{ .label = "Cache", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "brak liści cache w CPUID" });
+        b.add(.{ .label = b.t("Cache"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.t("brak liści cache w CPUID") });
     }
     for (info.cacheSlice()) |c| {
         const inst = instances(info, c);
@@ -259,30 +283,30 @@ pub fn build(arena: std.mem.Allocator, in: CpuInput) report.Page {
             .label = cacheName(c),
             .value = cacheLabel(&b, c, inst.n),
             .confidence = if (inst.derived) .medium else .high,
-            .note = if (inst.derived) "liczba instancji wyprowadzona z topologii (cache prywatny rdzenia × liczba rdzeni)" else "",
-            .raw = b.fmt("{d} B/instancję", .{c.size_bytes}),
-            .source = "CPUID (liść cache: 4 / 0x8000001D)",
+            .note = if (inst.derived) b.t("liczba instancji wyprowadzona z topologii (cache prywatny rdzenia × liczba rdzeni)") else "",
+            .raw = b.tf("{bytes} B/instancję", .{ .bytes = c.size_bytes }),
+            .source = b.t("CPUID (liść cache: 4 / 0x8000001D)"),
         });
         b.add(.{
-            .label = b.fmt("{s} — opis", .{cacheName(c)}),
-            .value = if (c.associativity > 0) b.fmt("{d}-way, linia {d} B, {d} zestawów", .{ c.associativity, c.line_size, c.sets }) else b.fmt("linia {d} B, {d} zestawów", .{ c.line_size, c.sets }),
-            .source = "CPUID (liść cache: 4 / 0x8000001D)",
+            .label = cacheDescName(c),
+            .value = if (c.associativity > 0) b.tp("{ways}-way, linia {line} B, {n} zestawów", c.sets, .{ .ways = c.associativity, .line = c.line_size }) else b.tp("linia {line} B, {n} zestawów", c.sets, .{ .line = c.line_size }),
+            .source = b.t("CPUID (liść cache: 4 / 0x8000001D)"),
         });
     }
 
     // --- instrukcje -------------------------------------------------------------
-    b.section("Zestaw instrukcji");
+    b.section(b.t("Zestaw instrukcji"));
     const r = isa.decode(&raw_info.cpuid);
     var buf: [1024]u8 = undefined;
-    b.add(.{ .label = "Instrukcje", .value = b.dup(isa.joinPresent(&r, &buf, null)), .raw = b.fmt("{d} rozszerzeń", .{r.count}), .source = "CPUID 1, 7.0, 7.1, 0x80000001 (Intel SDM 2A, AMD APM 3)" });
-    b.add(.{ .label = "Poziom x86-64", .value = r.level.label(), .source = "wyprowadzone z bitów CPUID wg x86-64 psABI §3.1.1", .confidence = .high });
-    const virt = if (r.has("VT-x")) "VT-x" else if (r.has("AMD-V")) "AMD-V" else "nie zgłoszona";
+    b.add(.{ .label = b.t("Instrukcje"), .value = b.dup(isa.joinPresent(&r, &buf, null)), .raw = b.tp("{n} rozszerzeń", r.count, .{}), .source = "CPUID 1, 7.0, 7.1, 0x80000001 (Intel SDM 2A, AMD APM 3)" });
+    b.add(.{ .label = b.t("Poziom x86-64"), .value = r.level.label(), .source = b.t("wyprowadzone z bitów CPUID wg x86-64 psABI §3.1.1"), .confidence = .high });
+    const virt = if (r.has("VT-x")) "VT-x" else if (r.has("AMD-V")) "AMD-V" else b.t("nie zgłoszona");
     b.add(.{
-        .label = "Wirtualizacja",
+        .label = b.t("Wirtualizacja"),
         .value = virt,
         .source = "CPUID.1 ECX[5] (VMX) / 0x80000001 ECX[2] (SVM)",
         .confidence = if (r.hypervisor) .medium else .high,
-        .note = if (r.hypervisor) "działamy pod hypervisorem (CPUID.1 ECX[31]) — bit wirtualizacji może być ukryty przez Hyper-V/VBS" else "",
+        .note = if (r.hypervisor) b.t("działamy pod hypervisorem (CPUID.1 ECX[31]) — bit wirtualizacji może być ukryty przez Hyper-V/VBS") else "",
     });
     inline for (.{ isa.Group.simd, isa.Group.avx512, isa.Group.crypto, isa.Group.security }) |g| {
         const s = isa.joinPresent(&r, &buf, g);
@@ -290,11 +314,11 @@ pub fn build(arena: std.mem.Allocator, in: CpuInput) report.Page {
     }
 
     // --- pochodzenie -------------------------------------------------------------
-    b.section("Pochodzenie danych");
-    b.add(.{ .label = "Dopasowanie HWDB", .value = info.match.toSlice(), .source = b.fmt("decode={s}", .{in.outcome.toSlice()}) });
-    b.add(.{ .label = "Źródło wpisu", .value = info.db_source orelse "—", .source = info.db_source_url orelse "", .state = if (info.db_source == null) .unavailable else .ok });
+    b.section(b.t("Pochodzenie danych"));
+    b.add(.{ .label = b.t("Dopasowanie HWDB"), .value = info.match.toSlice(), .source = b.fmt("decode={s}", .{in.outcome.toSlice()}) });
+    b.add(.{ .label = b.t("Źródło wpisu"), .value = info.db_source orelse "—", .source = info.db_source_url orelse "", .state = if (info.db_source == null) .unavailable else .ok });
     for (0..raw_info.diagnostics.len) |i| {
-        b.add(.{ .label = "Diagnostyka", .value = b.dup(raw_info.diagnostics.get(i)), .source = "probe" });
+        b.add(.{ .label = b.t("Diagnostyka"), .value = b.dup(raw_info.diagnostics.get(i)), .source = "probe" });
     }
 
     var mb: [128]u8 = undefined;

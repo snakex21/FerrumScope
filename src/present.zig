@@ -12,6 +12,7 @@ const metrics = @import("telemetry/metrics.zig");
 const catalog = @import("telemetry/catalog.zig");
 const raw = @import("core/raw.zig");
 const model = @import("core/model.zig");
+const i18n = @import("i18n/i18n.zig");
 
 pub const version = "0.2.0-dev";
 
@@ -24,11 +25,11 @@ pub const nominal_hz_assumed: u64 = 3_800_000_000;
 
 pub fn explainDisplay(d: model.DisplaySource) []const u8 {
     return switch (d) {
-        .brand_string => "brand string z CPUID (0x80000002..4)",
-        .hwdb => "wpis HWDB (dokładne trafienie)",
-        .hwdb_pattern => "wpis HWDB (dopasowanie wzorcem rodziny)",
-        .generated => "wygenerowana z sygnatury CPUID",
-        .hex_id => "identyfikator CPUID — brak lepszej informacji",
+        .brand_string => i18n.t("brand string z CPUID (0x80000002..4)"),
+        .hwdb => i18n.t("wpis HWDB (dokładne trafienie)"),
+        .hwdb_pattern => i18n.t("wpis HWDB (dopasowanie wzorcem rodziny)"),
+        .generated => i18n.t("wygenerowana z sygnatury CPUID"),
+        .hex_id => i18n.t("identyfikator CPUID — brak lepszej informacji"),
     };
 }
 
@@ -57,7 +58,7 @@ pub const NoMsrBackend = struct {
                 return 0;
             }
             fn name(_: *anyopaque) []const u8 {
-                return "brak dostępu do MSR (sterownik niezaładowany lub nie zaimplementowany)";
+                return i18n.t("brak dostępu do MSR (sterownik niezaładowany lub nie zaimplementowany)");
             }
         };
         return &struct {
@@ -81,7 +82,7 @@ pub const NoMsrBackend = struct {
 /// wyszło („pierwsza próbka"), i jest bardziej użyteczny niż ogólny stan katalogu.
 pub fn sampleReason(s: metrics.Sample) []const u8 {
     if (s.detail.len != 0) return s.detail;
-    return "brak wartości w próbce";
+    return i18n.t("brak wartości w próbce");
 }
 
 pub fn findSample(list: []const metrics.Sample, id: []const u8) ?metrics.Sample {
@@ -97,7 +98,7 @@ pub fn findSample(list: []const metrics.Sample, id: []const u8) ?metrics.Sample 
 /// „APERF/MPERF unavailable" sugerowałoby, że inne rejestry działają, a to
 /// byłoby kłamstwo diagnostyczne: nie działają żadne.
 pub fn reasonFor(m: catalog.Metric, caps: msr.CapabilitySet) []const u8 {
-    if (caps.has(.msr_read)) return m.unavailableReason(caps) orelse "brak wymaganych zdolności";
+    if (caps.has(.msr_read)) return m.unavailableReason(caps) orelse i18n.t("brak wymaganych zdolności");
     if (m.descriptor.source == .platform) return catalog.capabilityName(.platform_utilization);
     return catalog.capabilityName(.msr_read);
 }
@@ -108,7 +109,7 @@ pub fn reasonFor(m: catalog.Metric, caps: msr.CapabilitySet) []const u8 {
 /// widzę temperatury" musi zobaczyć, czego brakuje — sama liczba „4 z 6" nic
 /// nie mówi.
 pub fn capsSummary(caps: msr.CapabilitySet, buf: []u8) []const u8 {
-    if (caps.bits == 0) return "brak";
+    if (caps.bits == 0) return i18n.t("brak");
     var w: usize = 0;
     inline for (@typeInfo(msr.Capability).@"enum".fields) |fld| {
         const c: msr.Capability = @enumFromInt(fld.value);

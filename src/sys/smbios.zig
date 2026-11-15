@@ -23,6 +23,7 @@
 //! jej jako fixture testowego.
 
 const std = @import("std");
+const i18n = @import("../i18n/i18n.zig");
 
 /// Błędy warstwy surowej.
 pub const Error = error{
@@ -467,15 +468,15 @@ pub const System = struct {
 
 pub fn wakeUpTypeName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x00 => "Reserved",
-        0x01 => "Other",
-        0x02 => "Unknown",
-        0x03 => "APM Timer",
-        0x04 => "Modem Ring",
-        0x05 => "LAN Remote",
-        0x06 => "Power Switch",
+        0x00 => i18n.t("Reserved"),
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
+        0x03 => i18n.t("APM Timer"),
+        0x04 => i18n.t("Modem Ring"),
+        0x05 => i18n.t("LAN Remote"),
+        0x06 => i18n.t("Power Switch"),
         0x07 => "PCI PME#",
-        0x08 => "AC Power Restored",
+        0x08 => i18n.t("AC Power Restored"),
         else => null,
     };
 }
@@ -528,19 +529,19 @@ pub const Baseboard = struct {
 
 pub fn boardTypeName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Unknown",
-        0x02 => "Other",
-        0x03 => "Server Blade",
-        0x04 => "Connectivity Switch",
-        0x05 => "System Management Module",
-        0x06 => "Processor Module",
-        0x07 => "I/O Module",
-        0x08 => "Memory Module",
-        0x09 => "Daughter board",
-        0x0A => "Motherboard",
-        0x0B => "Processor/Memory Module",
-        0x0C => "Processor/IO Module",
-        0x0D => "Interconnect board",
+        0x01 => i18n.t("Unknown"),
+        0x02 => i18n.t("Other"),
+        0x03 => i18n.t("Server Blade"),
+        0x04 => i18n.t("Connectivity Switch"),
+        0x05 => i18n.t("System Management Module"),
+        0x06 => i18n.t("Processor Module"),
+        0x07 => i18n.t("I/O Module"),
+        0x08 => i18n.t("Memory Module"),
+        0x09 => i18n.t("Daughter board"),
+        0x0A => i18n.t("Motherboard"),
+        0x0B => i18n.t("Processor/Memory Module"),
+        0x0C => i18n.t("Processor/IO Module"),
+        0x0D => i18n.t("Interconnect board"),
         else => null,
     };
 }
@@ -579,42 +580,42 @@ pub const Chassis = struct {
 /// Typ obudowy (tabela §7.4.1); `v` bez bitu zamka.
 pub fn chassisTypeName(v: u8) ?[]const u8 {
     return switch (v & 0x7F) {
-        0x01 => "Other",
-        0x02 => "Unknown",
-        0x03 => "Desktop",
-        0x04 => "Low Profile Desktop",
-        0x05 => "Pizza Box",
-        0x06 => "Mini Tower",
-        0x07 => "Tower",
-        0x08 => "Portable",
-        0x09 => "Laptop",
-        0x0A => "Notebook",
-        0x0B => "Hand Held",
-        0x0C => "Docking Station",
-        0x0D => "All in One",
-        0x0E => "Sub Notebook",
-        0x0F => "Space-saving",
-        0x10 => "Lunch Box",
-        0x11 => "Main Server Chassis",
-        0x12 => "Expansion Chassis",
-        0x13 => "SubChassis",
-        0x14 => "Bus Expansion Chassis",
-        0x15 => "Peripheral Chassis",
-        0x16 => "RAID Chassis",
-        0x17 => "Rack Mount Chassis",
-        0x18 => "Sealed-case PC",
-        0x19 => "Multi-system chassis",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
+        0x03 => i18n.t("Desktop"),
+        0x04 => i18n.t("Low Profile Desktop"),
+        0x05 => i18n.t("Pizza Box"),
+        0x06 => i18n.t("Mini Tower"),
+        0x07 => i18n.t("Tower"),
+        0x08 => i18n.t("Portable"),
+        0x09 => i18n.t("Laptop"),
+        0x0A => i18n.t("Notebook"),
+        0x0B => i18n.t("Hand Held"),
+        0x0C => i18n.t("Docking Station"),
+        0x0D => i18n.t("All in One"),
+        0x0E => i18n.t("Sub Notebook"),
+        0x0F => i18n.t("Space-saving"),
+        0x10 => i18n.t("Lunch Box"),
+        0x11 => i18n.t("Main Server Chassis"),
+        0x12 => i18n.t("Expansion Chassis"),
+        0x13 => i18n.t("SubChassis"),
+        0x14 => i18n.t("Bus Expansion Chassis"),
+        0x15 => i18n.t("Peripheral Chassis"),
+        0x16 => i18n.t("RAID Chassis"),
+        0x17 => i18n.t("Rack Mount Chassis"),
+        0x18 => i18n.t("Sealed-case PC"),
+        0x19 => i18n.t("Multi-system chassis"),
         0x1A => "Compact PCI",
         0x1B => "Advanced TCA",
-        0x1C => "Blade",
-        0x1D => "Blade Enclosure",
-        0x1E => "Tablet",
-        0x1F => "Convertible",
-        0x20 => "Detachable",
-        0x21 => "IoT Gateway",
-        0x22 => "Embedded PC",
-        0x23 => "Mini PC",
-        0x24 => "Stick PC",
+        0x1C => i18n.t("Blade"),
+        0x1D => i18n.t("Blade Enclosure"),
+        0x1E => i18n.t("Tablet"),
+        0x1F => i18n.t("Convertible"),
+        0x20 => i18n.t("Detachable"),
+        0x21 => i18n.t("IoT Gateway"),
+        0x22 => i18n.t("Embedded PC"),
+        0x23 => i18n.t("Mini PC"),
+        0x24 => i18n.t("Stick PC"),
         else => null,
     };
 }
@@ -681,12 +682,12 @@ pub const Processor = struct {
 
 pub fn processorTypeName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Other",
-        0x02 => "Unknown",
-        0x03 => "Central Processor",
-        0x04 => "Math Processor",
-        0x05 => "DSP Processor",
-        0x06 => "Video Processor",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
+        0x03 => i18n.t("Central Processor"),
+        0x04 => i18n.t("Math Processor"),
+        0x05 => i18n.t("DSP Processor"),
+        0x06 => i18n.t("Video Processor"),
         else => null,
     };
 }
@@ -694,12 +695,12 @@ pub fn processorTypeName(v: u8) ?[]const u8 {
 /// Status CPU (bity 2:0 bajtu 18h).
 pub fn cpuStatusName(v: u8) ?[]const u8 {
     return switch (v) {
-        0 => "Unknown",
-        1 => "CPU Enabled",
-        2 => "CPU Disabled by User through BIOS Setup",
-        3 => "CPU Disabled by BIOS (POST Error)",
-        4 => "CPU is Idle, waiting to be enabled",
-        7 => "Other",
+        0 => i18n.t("Unknown"),
+        1 => i18n.t("CPU Enabled"),
+        2 => i18n.t("CPU Disabled by User through BIOS Setup"),
+        3 => i18n.t("CPU Disabled by BIOS (POST Error)"),
+        4 => i18n.t("CPU is Idle, waiting to be enabled"),
+        7 => i18n.t("Other"),
         else => null,
     };
 }
@@ -708,16 +709,16 @@ pub fn cpuStatusName(v: u8) ?[]const u8 {
 /// Wartości 4Ch-57h pochodzą z DSP0134 3.8/3.9.
 pub fn processorUpgradeName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Other",
-        0x02 => "Unknown",
-        0x03 => "Daughter Board",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
+        0x03 => i18n.t("Daughter Board"),
         0x04 => "ZIF Socket",
-        0x05 => "Replaceable Piggy Back",
-        0x06 => "None",
+        0x05 => i18n.t("Replaceable Piggy Back"),
+        0x06 => i18n.t("None"),
         0x07 => "LIF Socket",
         0x08 => "Slot 1",
         0x09 => "Slot 2",
-        0x0A => "370-pin socket",
+        0x0A => i18n.t("370-pin socket"),
         0x0B => "Slot A",
         0x0C => "Slot M",
         0x0D => "Socket 423",
@@ -897,12 +898,12 @@ pub const Cache = struct {
 /// Typ korekcji błędów cache (§7.8.5).
 pub fn cacheErrorCorrectionName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Other",
-        0x02 => "Unknown",
-        0x03 => "None",
-        0x04 => "Parity",
-        0x05 => "Single-bit ECC",
-        0x06 => "Multi-bit ECC",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
+        0x03 => i18n.t("None"),
+        0x04 => i18n.t("Parity"),
+        0x05 => i18n.t("Single-bit ECC"),
+        0x06 => i18n.t("Multi-bit ECC"),
         else => null,
     };
 }
@@ -910,11 +911,11 @@ pub fn cacheErrorCorrectionName(v: u8) ?[]const u8 {
 /// Typ cache (§7.8.6).
 pub fn systemCacheTypeName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Other",
-        0x02 => "Unknown",
-        0x03 => "Instruction",
-        0x04 => "Data",
-        0x05 => "Unified",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
+        0x03 => i18n.t("Instruction"),
+        0x04 => i18n.t("cache\x04Data"),
+        0x05 => i18n.t("Unified"),
         else => null,
     };
 }
@@ -922,20 +923,20 @@ pub fn systemCacheTypeName(v: u8) ?[]const u8 {
 /// Asocjacyjność (§7.8.7).
 pub fn associativityName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Other",
-        0x02 => "Unknown",
-        0x03 => "Direct Mapped",
-        0x04 => "2-way Set-Associative",
-        0x05 => "4-way Set-Associative",
-        0x06 => "Fully Associative",
-        0x07 => "8-way Set-Associative",
-        0x08 => "16-way Set-Associative",
-        0x09 => "12-way Set-Associative",
-        0x0A => "24-way Set-Associative",
-        0x0B => "32-way Set-Associative",
-        0x0C => "48-way Set-Associative",
-        0x0D => "64-way Set-Associative",
-        0x0E => "20-way Set-Associative",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
+        0x03 => i18n.t("Direct Mapped"),
+        0x04 => i18n.t("2-way Set-Associative"),
+        0x05 => i18n.t("4-way Set-Associative"),
+        0x06 => i18n.t("Fully Associative"),
+        0x07 => i18n.t("8-way Set-Associative"),
+        0x08 => i18n.t("16-way Set-Associative"),
+        0x09 => i18n.t("12-way Set-Associative"),
+        0x0A => i18n.t("24-way Set-Associative"),
+        0x0B => i18n.t("32-way Set-Associative"),
+        0x0C => i18n.t("48-way Set-Associative"),
+        0x0D => i18n.t("64-way Set-Associative"),
+        0x0E => i18n.t("20-way Set-Associative"),
         else => null,
     };
 }
@@ -1008,21 +1009,21 @@ pub const MemoryArray = struct {
 /// Lokalizacja macierzy pamięci (§7.17.1).
 pub fn memoryArrayLocationName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Other",
-        0x02 => "Unknown",
-        0x03 => "System board or motherboard",
-        0x04 => "ISA add-on card",
-        0x05 => "EISA add-on card",
-        0x06 => "PCI add-on card",
-        0x07 => "MCA add-on card",
-        0x08 => "PCMCIA add-on card",
-        0x09 => "Proprietary add-on card",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
+        0x03 => i18n.t("System board or motherboard"),
+        0x04 => i18n.t("ISA add-on card"),
+        0x05 => i18n.t("EISA add-on card"),
+        0x06 => i18n.t("PCI add-on card"),
+        0x07 => i18n.t("MCA add-on card"),
+        0x08 => i18n.t("PCMCIA add-on card"),
+        0x09 => i18n.t("Proprietary add-on card"),
         0x0A => "NuBus",
-        0xA0 => "PC-98/C20 add-on card",
-        0xA1 => "PC-98/C24 add-on card",
-        0xA2 => "PC-98/E add-on card",
-        0xA3 => "PC-98/Local bus add-on card",
-        0xA4 => "CXL add-on card",
+        0xA0 => i18n.t("PC-98/C20 add-on card"),
+        0xA1 => i18n.t("PC-98/C24 add-on card"),
+        0xA2 => i18n.t("PC-98/E add-on card"),
+        0xA3 => i18n.t("PC-98/Local bus add-on card"),
+        0xA4 => i18n.t("CXL add-on card"),
         else => null,
     };
 }
@@ -1030,13 +1031,13 @@ pub fn memoryArrayLocationName(v: u8) ?[]const u8 {
 /// Przeznaczenie macierzy pamięci (§7.17.2).
 pub fn memoryArrayUseName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Other",
-        0x02 => "Unknown",
-        0x03 => "System memory",
-        0x04 => "Video memory",
-        0x05 => "Flash memory",
-        0x06 => "Non-volatile RAM",
-        0x07 => "Cache memory",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
+        0x03 => i18n.t("System memory"),
+        0x04 => i18n.t("Video memory"),
+        0x05 => i18n.t("Flash memory"),
+        0x06 => i18n.t("Non-volatile RAM"),
+        0x07 => i18n.t("Cache memory"),
         else => null,
     };
 }
@@ -1044,12 +1045,12 @@ pub fn memoryArrayUseName(v: u8) ?[]const u8 {
 /// Typ korekcji błędów pamięci (§7.17.3).
 pub fn memoryErrorCorrectionName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Other",
-        0x02 => "Unknown",
-        0x03 => "None",
-        0x04 => "Parity",
-        0x05 => "Single-bit ECC",
-        0x06 => "Multi-bit ECC",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
+        0x03 => i18n.t("None"),
+        0x04 => i18n.t("Parity"),
+        0x05 => i18n.t("Single-bit ECC"),
+        0x06 => i18n.t("Multi-bit ECC"),
         0x07 => "CRC",
         else => null,
     };
@@ -1124,23 +1125,24 @@ pub const TypeDetail = struct {
     spec: []const u8,
 
     pub const bit_names = [16]?[]const u8{
-        null,            "Other",                 "Unknown",                   "Fast-paged",
-        "Static column", "Pseudo-static",         "RAMBUS",                    "Synchronous",
-        "CMOS",          "EDO",                   "Window DRAM",               "Cache DRAM",
-        "Non-volatile",  "Registered (Buffered)", "Unbuffered (Unregistered)", "LRDIMM",
+        null,                    i18n.N("Other"),                 i18n.N("Unknown"),                   i18n.N("Fast-paged"),
+        i18n.N("Static column"), i18n.N("Pseudo-static"),         "RAMBUS",                            i18n.N("Synchronous"),
+        "CMOS",                  "EDO",                           i18n.N("Window DRAM"),               i18n.N("Cache DRAM"),
+        i18n.N("Non-volatile"),  i18n.N("Registered (Buffered)"), i18n.N("Unbuffered (Unregistered)"), "LRDIMM",
     };
 
     pub fn has(self: TypeDetail, bit: u4) bool {
         return (self.raw >> bit) & 1 != 0;
     }
 
-    /// Wypełnia `out` nazwami ustawionych bitów i zwraca wypełniony wycinek.
+    /// Wypełnia `out` nazwami ustawionych bitów (przetłumaczonymi) i zwraca
+    /// wypełniony wycinek.
     pub fn names(self: TypeDetail, out: *[16][]const u8) [][]const u8 {
         var n: usize = 0;
         for (bit_names, 0..) |maybe, i| {
             const name = maybe orelse continue;
             if (self.has(@intCast(i))) {
-                out[n] = name;
+                out[n] = i18n.t(name);
                 n += 1;
             }
         }
@@ -1186,22 +1188,22 @@ pub const MemoryDevice = struct {
 /// Form factor (§7.18.1).
 pub fn formFactorName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Other",
-        0x02 => "Unknown",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
         0x03 => "SIMM",
         0x04 => "SIP",
-        0x05 => "Chip",
+        0x05 => i18n.t("Chip"),
         0x06 => "DIP",
         0x07 => "ZIP",
-        0x08 => "Proprietary Card",
+        0x08 => i18n.t("Proprietary Card"),
         0x09 => "DIMM",
         0x0A => "TSOP",
-        0x0B => "Row of chips",
+        0x0B => i18n.t("Row of chips"),
         0x0C => "RIMM",
         0x0D => "SODIMM",
         0x0E => "SRIMM",
         0x0F => "FB-DIMM",
-        0x10 => "Die",
+        0x10 => i18n.t("Die"),
         0x11 => "CAMM",
         else => null,
     };
@@ -1210,8 +1212,8 @@ pub fn formFactorName(v: u8) ?[]const u8 {
 /// Typ pamięci (§7.18.2).
 pub fn memoryTypeName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Other",
-        0x02 => "Unknown",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
         0x03 => "DRAM",
         0x04 => "EDRAM",
         0x05 => "VRAM",
@@ -1237,7 +1239,7 @@ pub fn memoryTypeName(v: u8) ?[]const u8 {
         0x1C => "LPDDR2",
         0x1D => "LPDDR3",
         0x1E => "LPDDR4",
-        0x1F => "Logical non-volatile device",
+        0x1F => i18n.t("Logical non-volatile device"),
         0x20 => "HBM",
         0x21 => "HBM2",
         0x22 => "DDR5",
@@ -1250,13 +1252,13 @@ pub fn memoryTypeName(v: u8) ?[]const u8 {
 /// Technologia pamięci (§7.18.6, 3.2+).
 pub fn memoryTechnologyName(v: u8) ?[]const u8 {
     return switch (v) {
-        0x01 => "Other",
-        0x02 => "Unknown",
+        0x01 => i18n.t("Other"),
+        0x02 => i18n.t("Unknown"),
         0x03 => "DRAM",
         0x04 => "NVDIMM-N",
         0x05 => "NVDIMM-F",
         0x06 => "NVDIMM-P",
-        0x07 => "Intel Optane persistent memory",
+        0x07 => i18n.t("Intel Optane persistent memory"),
         else => null,
     };
 }
@@ -1479,7 +1481,7 @@ pub fn summarizeMemory(table: Table) MemorySummary {
         .mixed_types = false,
         .channels = null,
         .channel_confidence = .none,
-        .channel_method = "brak danych: lokatory nie pasują do znanych wzorców",
+        .channel_method = i18n.t("brak danych: lokatory nie pasują do znanych wzorców"),
     };
     var keys: [32]u16 = undefined;
     var n_keys: usize = 0;
@@ -1518,8 +1520,8 @@ pub fn summarizeMemory(table: Table) MemorySummary {
         sum.channels = @intCast(n_keys);
         sum.channel_confidence = if (missing) .low else min_conf;
         sum.channel_method = switch (sum.channel_confidence) {
-            .medium => "heurystyka: słowo 'CHANNEL' w lokatorach obsadzonych gniazd",
-            else => "heurystyka: wzorzec DIMM_<litera> lub niepełne dane lokatorów",
+            .medium => i18n.t("heurystyka: słowo 'CHANNEL' w lokatorach obsadzonych gniazd"),
+            else => i18n.t("heurystyka: wzorzec DIMM_<litera> lub niepełne dane lokatorów"),
         };
     }
     return sum;

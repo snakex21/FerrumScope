@@ -13,6 +13,7 @@
 
 const std = @import("std");
 const model = @import("../core/model.zig");
+const i18n = @import("../i18n/i18n.zig");
 
 pub const Confidence = model.Confidence;
 
@@ -33,12 +34,12 @@ pub const State = enum {
 
     pub fn label(self: State) []const u8 {
         return switch (self) {
-            .ok => "ok",
-            .estimate => "oszacowanie",
-            .unavailable => "niedostępne",
-            .requires_admin => "wymaga administratora",
-            .requires_driver => "wymaga sterownika (planowane)",
-            .placeholder => "zaślepka firmware",
+            .ok => i18n.t("ok"),
+            .estimate => i18n.t("oszacowanie"),
+            .unavailable => i18n.t("niedostępne"),
+            .requires_admin => i18n.t("wymaga administratora"),
+            .requires_driver => i18n.t("wymaga sterownika (planowane)"),
+            .placeholder => i18n.t("zaślepka firmware"),
         };
     }
 
@@ -64,6 +65,10 @@ pub const Field = struct {
 
 pub const Link = struct {
     label: []const u8,
+    /// Stały, nietłumaczony klucz rodzaju odnośnika (`cpu_search`, `gpu_search`,
+    /// `drivers`, `chipset_drivers`, `db`). GUI wiąże przyciski po kluczu, nie po
+    /// etykiecie — etykieta zależy od języka.
+    key: []const u8 = "",
     url: []const u8,
     /// Krótki opis do raportu („wyszukiwanie po nazwie”, „po ID urządzenia”).
     note: []const u8 = "",
@@ -94,6 +99,11 @@ pub const Page = struct {
 };
 
 /// Pomocnik do budowania strony. Wszystkie napisy żyją w `arena`.
+///
+/// Teksty dla ludzi przechodzą przez `t` / `tf` / `tp` (identyfikator =
+/// polski literał, wymuszony `comptime`) — strony powstają od razu w bieżącym
+/// języku. Wartości techniczne (MHz, ID PCI, nazwy instrukcji) wpisuje się
+/// bez katalogu.
 pub const Builder = struct {
     arena: std.mem.Allocator,
     page: *Page,
@@ -102,12 +112,28 @@ pub const Builder = struct {
         return .{ .arena = arena, .page = page };
     }
 
+    /// Tłumaczenie identyfikatora (tekstu polskiego).
+    pub fn t(self: *Builder, comptime id: []const u8) []const u8 {
+        _ = self;
+        return i18n.t(id);
+    }
+
+    /// Tłumaczenie z parametrami nazwanymi (`{name}`), wynik w arenie strony.
+    pub fn tf(self: *Builder, comptime id: []const u8, args: anytype) []const u8 {
+        return i18n.tf(self.arena, id, args);
+    }
+
+    /// Tłumaczenie zależne od liczby `n` (formy CLDR z katalogu).
+    pub fn tp(self: *Builder, comptime id: []const u8, n: anytype, args: anytype) []const u8 {
+        return i18n.tp(self.arena, id, n, args);
+    }
+
     pub fn section(self: *Builder, title: []const u8) void {
         self.page.sections.append(self.arena, .{ .title = title }) catch {};
     }
 
     pub fn add(self: *Builder, f: Field) void {
-        if (self.page.sections.items.len == 0) self.section("Ogólne");
+        if (self.page.sections.items.len == 0) self.section(i18n.t("Ogólne"));
         const s = &self.page.sections.items[self.page.sections.items.len - 1];
         s.fields.append(self.arena, f) catch {};
     }
@@ -119,11 +145,11 @@ pub const Builder = struct {
     /// Formatowanie do areny; przy braku pamięci zwraca stały tekst zamiast
     /// propagować błąd — brak jednej etykiety nie może zatrzymać raportu.
     pub fn fmt(self: *Builder, comptime f: []const u8, args: anytype) []const u8 {
-        return std.fmt.allocPrint(self.arena, f, args) catch "(brak pamięci)";
+        return std.fmt.allocPrint(self.arena, f, args) catch i18n.t("(brak pamięci)");
     }
 
     pub fn dup(self: *Builder, s: []const u8) []const u8 {
-        return self.arena.dupe(u8, s) catch "(brak pamięci)";
+        return self.arena.dupe(u8, s) catch i18n.t("(brak pamięci)");
     }
 };
 
@@ -192,24 +218,24 @@ pub fn writePageText(w: *std.Io.Writer, p: *const Page, opts: ExportOptions) !vo
             if (raw.len > 0 or f.source.len > 0) {
                 try w.writeAll("      ");
                 if (raw.len > 0) try w.print("raw={s}  ", .{raw});
-                if (f.source.len > 0) try w.print("źródło: {s}", .{f.source});
-                try w.print("  [pewność: {s}]", .{f.confidence.toSlice()});
+                if (f.source.len > 0) try w.print("{s} {s}", .{ i18n.t("źródło:"), f.source });
+                try w.print("  [{s} {s}]", .{ i18n.t("pewność:"), f.confidence.toSlice() });
                 try w.writeByte('\n');
             }
-            if (f.note.len > 0) try w.print("      uwaga: {s}\n", .{f.note});
+            if (f.note.len > 0) try w.print("      {s} {s}\n", .{ i18n.t("uwaga:"), f.note });
         }
     }
     if (p.links.items.len > 0) {
-        try w.writeAll("\n[Odnośniki]\n");
+        try w.print("\n[{s}]\n", .{i18n.t("Odnośniki")});
         for (p.links.items) |l| try w.print("  {s}: {s}\n", .{ l.label, l.url });
     }
     try w.writeByte('\n');
 }
 
 pub fn writeText(w: *std.Io.Writer, r: Report, opts: ExportOptions) !void {
-    try w.print("{s} {s} — raport sprzętu\n", .{ r.title, r.version });
-    if (r.generated.len > 0) try w.print("Wygenerowano: {s}\n", .{r.generated});
-    try w.print("Numery seryjne: {s}\n\n", .{if (opts.include_serials) "JAWNE (na życzenie)" else "zamaskowane"});
+    try w.print("{s} {s} — {s}\n", .{ r.title, r.version, i18n.t("raport sprzętu") });
+    if (r.generated.len > 0) try w.print("{s} {s}\n", .{ i18n.t("Wygenerowano:"), r.generated });
+    try w.print("{s} {s}\n\n", .{ i18n.t("Numery seryjne:"), if (opts.include_serials) i18n.t("JAWNE (na życzenie)") else i18n.t("zamaskowane") });
     for (r.pages) |*p| try writePageText(w, p, opts);
 }
 
@@ -309,11 +335,9 @@ pub fn writeHtmlEscaped(w: *std.Io.Writer, s: []const u8) !void {
     };
 }
 
-const html_head =
-    \\<!doctype html>
-    \\<html lang="pl"><head><meta charset="utf-8">
-    \\<meta name="viewport" content="width=device-width, initial-scale=1">
-    \\<title>FerrumScope — raport sprzętu</title>
+// Początek dokumentu (`lang`, tytuł) zależy od języka i powstaje w `writeHtml`;
+// tu jest tylko stały arkusz stylów.
+const html_style =
     \\<style>
     \\:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--head:#f5f5f7;--ok:#107c10;--warn:#b45a00}
     \\@media (prefers-color-scheme: dark){:root{--bg:#1c1c1e;--fg:#f2f2f7;--muted:#a1a1a6;--line:#38383a;--head:#2c2c2e;--ok:#4cd964;--warn:#ffb340}}
@@ -332,18 +356,29 @@ const html_head =
 ;
 
 pub fn writeHtml(w: *std.Io.Writer, r: Report, opts: ExportOptions) !void {
-    try w.writeAll(html_head);
+    try w.writeAll("<!doctype html>\n<html lang=\"");
+    try writeHtmlEscaped(w, i18n.locale());
+    try w.writeAll("\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>FerrumScope — ");
+    try writeHtmlEscaped(w, i18n.t("raport sprzętu"));
+    try w.writeAll("</title>\n");
+    try w.writeAll(html_style);
     try w.writeAll("<h1>");
     try writeHtmlEscaped(w, r.title);
     try w.writeAll(" ");
     try writeHtmlEscaped(w, r.version);
-    try w.writeAll(" — raport sprzętu</h1>\n<p class=\"meta\">");
+    try w.writeAll(" — ");
+    try writeHtmlEscaped(w, i18n.t("raport sprzętu"));
+    try w.writeAll("</h1>\n<p class=\"meta\">");
     if (r.generated.len > 0) {
-        try w.writeAll("Wygenerowano: ");
+        try writeHtmlEscaped(w, i18n.t("Wygenerowano:"));
+        try w.writeAll(" ");
         try writeHtmlEscaped(w, r.generated);
         try w.writeAll(" · ");
     }
-    try w.print("Numery seryjne: {s}</p>\n<nav>", .{if (opts.include_serials) "jawne (na życzenie)" else "zamaskowane"});
+    try writeHtmlEscaped(w, i18n.t("Numery seryjne:"));
+    try w.writeAll(" ");
+    try writeHtmlEscaped(w, if (opts.include_serials) i18n.t("jawne (na życzenie)") else i18n.t("zamaskowane"));
+    try w.writeAll("</p>\n<nav>");
     for (r.pages) |*p| {
         try w.writeAll("<a href=\"#");
         try writeHtmlEscaped(w, p.id);
@@ -402,7 +437,9 @@ pub fn writeHtml(w: *std.Io.Writer, r: Report, opts: ExportOptions) !void {
             try w.writeAll("</table>\n");
         }
         if (p.links.items.len > 0) {
-            try w.writeAll("<h3>Odnośniki</h3><ul>\n");
+            try w.writeAll("<h3>");
+            try writeHtmlEscaped(w, i18n.t("Odnośniki"));
+            try w.writeAll("</h3><ul>\n");
             for (p.links.items) |l| {
                 try w.writeAll("<li><a rel=\"noopener noreferrer\" href=\"");
                 try writeHtmlEscaped(w, l.url);
@@ -413,7 +450,9 @@ pub fn writeHtml(w: *std.Io.Writer, r: Report, opts: ExportOptions) !void {
             try w.writeAll("</ul>\n");
         }
     }
-    try w.writeAll("<p class=\"meta\">FerrumScope — GPL-3.0. Nazwy urządzeń PCI: PCI ID Repository (pci-ids.ucw.cz).</p>\n</body></html>\n");
+    try w.writeAll("<p class=\"meta\">FerrumScope — GPL-3.0. ");
+    try writeHtmlEscaped(w, i18n.t("Nazwy urządzeń PCI: PCI ID Repository (pci-ids.ucw.cz)."));
+    try w.writeAll("</p>\n</body></html>\n");
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,12 @@
 const std = @import("std");
 
+/// Kody języków — muszą odpowiadać `i18n.locales` w src/i18n/i18n.zig
+/// (sprawdza to test „i18n: katalogi …” w src/i18n/catalog_test.zig).
+const i18n_locales = [_][]const u8{
+    "pl", "en", "bg", "cs", "da",    "de", "el", "es", "et", "fi",      "fr", "hr", "hu", "it",
+    "lt", "lv", "nb", "nl", "pt-BR", "ro", "ru", "sk", "sl", "sr-Latn", "sv", "tr", "uk",
+};
+
 /// FerrumScope — build system.
 ///
 /// Kolejność zależności wynika z architektury, nie z przypadku:
@@ -155,6 +162,30 @@ pub fn build(b: *std.Build) void {
         \\
     );
 
+    // --- 2d. katalogi tłumaczeń (locales/*.json) ---------------------------------
+    // Lista kodów = `i18n.locales` (src/i18n/i18n.zig). Każdy plik musi istnieć —
+    // brak katalogu to błąd builda, nie cichy powrót do angielskiego. Języki
+    // jeszcze nieprzetłumaczone mają plik `{"@locale": "xx"}`.
+    const locales_files = b.addWriteFiles();
+    var locales_src: std.ArrayList(u8) = .empty;
+    var locales_jsons: std.ArrayList(u8) = .empty;
+    locales_src.appendSlice(b.allocator,
+        \\// Plik generowany przez build.zig. Nie edytuj ręcznie.
+        \\// Katalogi tłumaczeń: równoległe tablice kodów i treści JSON
+        \\// (`i18n.embeddedSources(@import("locales_embedded"))`).
+        \\pub const codes = [_][]const u8{
+        \\
+    ) catch @panic("OOM");
+    for (i18n_locales) |code| {
+        _ = locales_files.addCopyFile(b.path(b.fmt("locales/{s}.json", .{code})), b.fmt("{s}.json", .{code}));
+        locales_src.appendSlice(b.allocator, b.fmt("    \"{s}\",\n", .{code})) catch @panic("OOM");
+        locales_jsons.appendSlice(b.allocator, b.fmt("    @embedFile(\"{s}.json\"),\n", .{code})) catch @panic("OOM");
+    }
+    locales_src.appendSlice(b.allocator, "};\npub const jsons = [_][]const u8{\n") catch @panic("OOM");
+    locales_src.appendSlice(b.allocator, locales_jsons.items) catch @panic("OOM");
+    locales_src.appendSlice(b.allocator, "};\n") catch @panic("OOM");
+    const locales_mod = locales_files.add("locales_embedded.zig", locales_src.items);
+
     // --- 3. CLI --------------------------------------------------------------
     const cli_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -165,6 +196,7 @@ pub fn build(b: *std.Build) void {
     cli_mod.addAnonymousImport("fixtures_embedded", .{ .root_source_file = fixtures_mod });
     cli_mod.addAnonymousImport("pciids_embedded", .{ .root_source_file = pciids_mod_path });
     cli_mod.addAnonymousImport("links_embedded", .{ .root_source_file = links_mod });
+    cli_mod.addAnonymousImport("locales_embedded", .{ .root_source_file = locales_mod });
 
     const cli = b.addExecutable(.{
         .name = "ferrumscope",
@@ -192,6 +224,7 @@ pub fn build(b: *std.Build) void {
         gui_mod.addAnonymousImport("pciids_embedded", .{ .root_source_file = pciids_mod_path });
         gui_mod.addAnonymousImport("logos_embedded", .{ .root_source_file = logos_mod });
         gui_mod.addAnonymousImport("links_embedded", .{ .root_source_file = links_mod });
+        gui_mod.addAnonymousImport("locales_embedded", .{ .root_source_file = locales_mod });
 
         const gui = b.addExecutable(.{
             .name = "ferrumscope-gui",
@@ -239,7 +272,11 @@ pub fn build(b: *std.Build) void {
     lib_tests.root_module.addAnonymousImport("pciids_embedded", .{ .root_source_file = pciids_mod_path });
     lib_tests.root_module.addAnonymousImport("logos_embedded", .{ .root_source_file = logos_mod });
     lib_tests.root_module.addAnonymousImport("links_embedded", .{ .root_source_file = links_mod });
+    lib_tests.root_module.addAnonymousImport("locales_embedded", .{ .root_source_file = locales_mod });
     const run_lib_tests = b.addRunArtifact(lib_tests);
+    // Testy katalogu tłumaczeń czytają `src/**/*.zig` i `locales/` względem
+    // katalogu głównego projektu — niezależnie od tego, skąd wywołano `zig build`.
+    run_lib_tests.setCwd(b.path("."));
     test_step.dependOn(&run_lib_tests.step);
 
     // Testy kompilatora bazy: duplikaty, nakładanie zakresów, błędne enumy.

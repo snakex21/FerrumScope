@@ -25,6 +25,7 @@
 //! ```
 
 const std = @import("std");
+const i18n = @import("../i18n/i18n.zig");
 
 pub const Kind = enum { cpu, gpu };
 
@@ -43,9 +44,9 @@ pub const Origin = enum {
 
     pub fn label(self: Origin) []const u8 {
         return switch (self) {
-            .user => "link przypięty przez użytkownika (data\\links.toml)",
-            .curated => "tabela kuratorowana (db/source/links/techpowerup.toml)",
-            .search => "wyszukiwanie po nazwie",
+            .user => i18n.t("link przypięty przez użytkownika (data\\links.toml)"),
+            .curated => i18n.t("tabela kuratorowana (db/source/links/techpowerup.toml)"),
+            .search => i18n.t("wyszukiwanie po nazwie"),
         };
     }
 };

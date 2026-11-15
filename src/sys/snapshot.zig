@@ -7,6 +7,7 @@
 //! na plikach capture bez sprzętu.
 
 const std = @import("std");
+const i18n = @import("../i18n/i18n.zig");
 
 pub const Collect = enum {
     ok,
@@ -17,11 +18,11 @@ pub const Collect = enum {
 
     pub fn label(self: Collect) []const u8 {
         return switch (self) {
-            .ok => "ok",
-            .unavailable => "niedostępne",
-            .requires_admin => "wymaga administratora",
-            .unsupported => "nieobsługiwane",
-            .failed => "błąd odczytu",
+            .ok => i18n.t("ok"),
+            .unavailable => i18n.t("niedostępne"),
+            .requires_admin => i18n.t("wymaga administratora"),
+            .unsupported => i18n.t("nieobsługiwane"),
+            .failed => i18n.t("błąd odczytu"),
         };
     }
 };
@@ -128,7 +129,7 @@ pub fn linkSpeedLabel(code: u32) []const u8 {
         4 => "16 GT/s (PCIe 4.0)",
         5 => "32 GT/s (PCIe 5.0)",
         6 => "64 GT/s (PCIe 6.0)",
-        else => "nieznane kodowanie",
+        else => i18n.t("nieznane kodowanie"),
     };
 }
 

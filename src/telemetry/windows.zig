@@ -27,6 +27,7 @@
 //! a `ferrumscope sensors` mówi o tym wprost, zamiast zmyślać wartość.
 
 const std = @import("std");
+const i18n = @import("../i18n/i18n.zig");
 const builtin = @import("builtin");
 const msr = @import("msr.zig");
 const proto = @import("driver_proto.zig");
@@ -144,11 +145,11 @@ pub const OpenError = error{
 /// obu jako jednego błędu zmuszałoby użytkownika do zgadywania.
 pub fn openErrorDetail(e: OpenError) []const u8 {
     return switch (e) {
-        error.NotInstalled => "sterownik FerrumScopeMsr nie jest zainstalowany",
-        error.PermissionDenied => "brak uprawnień do urządzenia (wymagane konto administratora)",
-        error.VersionMismatch => "sterownik odpowiada inną wersją protokołu",
-        error.ProtocolViolation => "odpowiedź sterownika nie mieści się w buforze",
-        error.IoFailed => "błąd I/O przy komunikacji ze sterownikiem",
+        error.NotInstalled => i18n.t("sterownik FerrumScopeMsr nie jest zainstalowany"),
+        error.PermissionDenied => i18n.t("brak uprawnień do urządzenia (wymagane konto administratora)"),
+        error.VersionMismatch => i18n.t("sterownik odpowiada inną wersją protokołu"),
+        error.ProtocolViolation => i18n.t("odpowiedź sterownika nie mieści się w buforze"),
+        error.IoFailed => i18n.t("błąd I/O przy komunikacji ze sterownikiem"),
     };
 }
 

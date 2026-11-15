@@ -18,7 +18,11 @@
 //! „Pokaż numery seryjne” — to samo ustawienie obowiązuje przy eksporcie.
 //!
 //! Flagi: `--tab=<id>` (cpu, caches, board, memory, graphics, storage,
-//! sensors, bench, about) i `--list` / `--structured` (wymusza widok).
+//! sensors, bench, about), `--list` / `--structured` (wymusza widok) i
+//! `--lang=<kod>` (język interfejsu, np. `en`, `de`, `pt-BR`).
+//!
+//! Język: `--lang=` → `language` w `data\settings.ini` → język Windows.
+//! Wszystkie teksty okna przechodzą przez `i18n` (identyfikator = tekst polski).
 
 const std = @import("std");
 const w = @import("gui/win32.zig");
@@ -28,6 +32,12 @@ const app_mod = @import("app.zig");
 const ferrum = @import("root.zig");
 const pci_embedded = @import("db/pci_embedded.zig");
 const update = @import("update/update.zig");
+const i18n = @import("i18n/i18n.zig");
+const i18n_system = @import("i18n/system.zig");
+const settings = @import("settings.zig");
+
+/// Katalogi tłumaczeń osadzone w programie (build.zig → `locales_embedded`).
+const locale_sources = i18n.embeddedSources(@import("locales_embedded"));
 
 const report = ferrum.sys.report;
 
@@ -46,6 +56,7 @@ const ID_EXPORT_JSON: u16 = 103;
 const ID_SERIALS: u16 = 104;
 const ID_SOURCES: u16 = 105;
 const ID_LISTVIEW: u16 = 106;
+const ID_LANG: u16 = 107;
 const ID_SELECTOR0: u16 = 300; // + indeks zakładki
 const ID_CELLBTN0: u16 = 400; // + indeks komórki
 const ID_PINBTN0: u16 = 700; // + indeks komórki
@@ -96,6 +107,9 @@ const App = struct {
     chk_serials: ?w.HWND = null,
     chk_sources: ?w.HWND = null,
     chk_list: ?w.HWND = null,
+    /// Wybór języka (zakładka „O programie”, prawy górny róg w wierszu tytułu).
+    lang_label: ?w.HWND = null,
+    lang_combo: ?w.HWND = null,
     font: ?w.HFONT = null,
     font_title: ?w.HFONT = null,
     row_imgs: ?w.HIMAGELIST = null,
@@ -205,7 +219,7 @@ fn setFont(h: ?w.HWND, f: ?w.HFONT) void {
 
 fn applyFonts() void {
     const f = app.font;
-    for ([_]?w.HWND{ app.tab, app.lv, app.btn_refresh, app.chk_serials, app.chk_sources, app.chk_list }) |h| setFont(h, f);
+    for ([_]?w.HWND{ app.tab, app.lv, app.btn_refresh, app.chk_serials, app.chk_sources, app.chk_list, app.lang_label, app.lang_combo }) |h| setFont(h, f);
     for (app.cells[0..app.n_cells]) |c| {
         setFont(c.pin, f);
         setFont(c.lbl, f);
@@ -267,16 +281,18 @@ fn markTone(f: report.Field) Tone {
 /// Krótki znacznik pewności/stanu obok pola (gdy „Pokaż źródła”).
 fn markText(f: report.Field) []const u8 {
     return switch (f.state) {
+        // Litery tłumaczone z kontekstem „znacznik” (inaczej kolidowałyby
+        // z innymi jednoliterowymi tekstami); objaśnia je tekst „Znaczniki źródeł”.
         .ok => switch (f.confidence) {
-            .high => "W",
-            .medium => "Ś",
-            .low => "N",
+            .high => i18n.t("znacznik\x04W"),
+            .medium => i18n.t("znacznik\x04Ś"),
+            .low => i18n.t("znacznik\x04N"),
             .unknown => "?",
         },
         .estimate => "~",
-        .placeholder => "Z",
-        .requires_admin => "A",
-        .requires_driver => "S",
+        .placeholder => i18n.t("znacznik\x04Z"),
+        .requires_admin => i18n.t("znacznik\x04A"),
+        .requires_driver => i18n.t("znacznik\x04S"),
         .unavailable => "–",
     };
 }
@@ -308,18 +324,31 @@ fn fieldOfCell(c: *const CellCtl) ?*const report.Field {
 /// Treść podpowiedzi: źródło, pewność, surowa wartość, uwaga.
 var tip_buf: [2048]u16 = undefined;
 fn tipText(f: report.Field) [*:0]const u16 {
-    var b: [2048]u8 = undefined;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
     const raw = report.shownRaw(f, exportOpts());
-    const s = std.fmt.bufPrint(&b, "Źródło: {s}\nPewność: {s} · stan: {s}{s}{s}{s}{s}", .{
-        if (f.source.len > 0) f.source else "—",
-        f.confidence.toSlice(),
-        f.state.label(),
-        if (raw.len > 0) "\nSurowo: " else "",
-        raw,
-        if (f.note.len > 0) "\nUwaga: " else "",
-        f.note,
-    }) catch "Źródło: (za długie)";
-    return widen(&tip_buf, s);
+    var out: std.ArrayList(u8) = .empty;
+    out.appendSlice(a, i18n.tf(a, "Źródło: {source}\nPewność: {confidence} · stan: {state}", .{
+        .source = if (f.source.len > 0) f.source else "—",
+        .confidence = f.confidence.toSlice(),
+        .state = f.state.label(),
+    })) catch {};
+    if (raw.len > 0) {
+        out.append(a, '\n') catch {};
+        out.appendSlice(a, i18n.tf(a, "Surowo: {raw}", .{ .raw = raw })) catch {};
+    }
+    if (f.note.len > 0) {
+        out.append(a, '\n') catch {};
+        out.appendSlice(a, i18n.tf(a, "Uwaga: {note}", .{ .note = f.note })) catch {};
+    }
+    return widen(&tip_buf, out.items);
+}
+
+/// Tworzy kontrolkę z tekstem UTF-8 (np. przetłumaczonym).
+fn createText(class: [*:0]const u16, text: []const u8, ex: u32, style: u32, id: u16) ?w.HWND {
+    var wb: [1024]u16 = undefined;
+    return createChild(class, widen(&wb, text), ex, style, id);
 }
 
 // ---------------------------------------------------------------------------
@@ -350,32 +379,29 @@ fn createForms() void {
     const child = w.WS_CHILD;
     for (&forms.tabs, 0..) |*t, ti| {
         const tab: u8 = @intCast(ti);
+        // Teksty z forms.zig są identyfikatorami katalogu — tłumaczymy je tutaj.
         if (t.selector) |s| {
-            var wb: [64]u16 = undefined;
-            app.sel_label[ti] = createChild(L("STATIC"), widen(&wb, s.label), 0, child | w.SS_LEFT | w.SS_NOPREFIX, 0);
+            app.sel_label[ti] = createText(L("STATIC"), i18n.t(s.label), 0, child | w.SS_LEFT | w.SS_NOPREFIX | w.SS_ENDELLIPSIS, 0);
             app.sel_combo[ti] = createChild(L("COMBOBOX"), null, 0, child | w.WS_TABSTOP | w.WS_VSCROLL | w.CBS_DROPDOWNLIST, ID_SELECTOR0 + @as(u16, tab));
         }
         for (t.bands) |band| for (band) |*g| {
-            var wb: [128]u16 = undefined;
             if (app.n_groups < max_groups) {
-                app.groups[app.n_groups] = .{ .tab = tab, .hwnd = createChild(L("BUTTON"), widen(&wb, g.title), 0, child | w.BS_GROUPBOX, 0) };
+                app.groups[app.n_groups] = .{ .tab = tab, .hwnd = createText(L("BUTTON"), i18n.t(g.title), 0, child | w.BS_GROUPBOX, 0) };
                 app.n_groups += 1;
             }
             for (g.rows) |row| for (row) |*c| {
                 if (app.n_cells >= max_cells) continue;
-                var lb: [128]u16 = undefined;
                 const idx = app.n_cells;
                 var cc: CellCtl = .{ .tab = tab, .cell = c };
-                cc.lbl = createChild(L("STATIC"), widen(&lb, c.label), 0, child | w.SS_LEFT | w.SS_NOPREFIX | w.SS_ENDELLIPSIS, 0);
+                cc.lbl = createText(L("STATIC"), i18n.t(c.label), 0, child | w.SS_LEFT | w.SS_NOPREFIX | w.SS_ENDELLIPSIS, 0);
                 const multi: u32 = if (c.lines > 1) w.ES_MULTILINE else w.ES_AUTOHSCROLL;
                 cc.edit = createChild(L("EDIT"), null, 0, child | w.WS_TABSTOP | w.WS_BORDER | w.ES_READONLY | multi, 0);
                 cc.mark = createChild(L("STATIC"), null, 0, child | w.SS_NOPREFIX, 0);
                 if (c.button.len > 0) {
-                    var bb: [64]u16 = undefined;
-                    cc.btn = createChild(L("BUTTON"), widen(&bb, c.button), 0, child | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_CELLBTN0 + @as(u16, @intCast(idx)));
+                    cc.btn = createText(L("BUTTON"), i18n.t(c.button), 0, child | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_CELLBTN0 + @as(u16, @intCast(idx)));
                 }
                 if (c.pin) {
-                    cc.pin = createChild(L("BUTTON"), L("Przypnij…"), 0, child | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_PINBTN0 + @as(u16, @intCast(idx)));
+                    cc.pin = createText(L("BUTTON"), i18n.t("Przypnij…"), 0, child | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_PINBTN0 + @as(u16, @intCast(idx)));
                 }
                 app.cells[idx] = cc;
                 app.n_cells += 1;
@@ -401,32 +427,38 @@ fn createSpecialTabs() void {
     @setEvalBranchQuota(50000);
     const st = w.WS_CHILD | w.SS_LEFT | w.SS_NOPREFIX;
     // --- Bench (zapowiedź) ---------------------------------------------------
-    extra(ix_bench, createChild(L("BUTTON"), L("Benchmark i test obciążeniowy"), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
-    extra(ix_bench, createChild(L("STATIC"), L("Planowane: test wydajności jednego wątku i wszystkich wątków oraz test " ++
-        "stabilności pod obciążeniem.\n\nW tej wersji nic nie jest mierzone ani uruchamiane — zakładka tylko rezerwuje " ++
-        "miejsce. Wyniki będą miały to samo źródło i pewność co reszta programu."), 0, st, 0));
+    extra(ix_bench, createText(L("BUTTON"), i18n.t("Benchmark i test obciążeniowy"), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
+    extra(ix_bench, createText(L("STATIC"), i18n.t("Planowane: test wydajności jednego wątku i wszystkich wątków oraz test stabilności pod obciążeniem.\n\nW tej wersji nic nie jest mierzone ani uruchamiane — zakładka tylko rezerwuje miejsce. Wyniki będą miały to samo źródło i pewność co reszta programu."), 0, st, 0));
     // --- O programie ----------------------------------------------------------
     extra(ix_about, createChild(L("BUTTON"), L("FerrumScope"), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
-    var info: [1024]u8 = undefined;
-    const pci_ver = if (pci_embedded.get()) |db| db.version() else "niedostępna";
-    const txt = std.fmt.bufPrint(&info, "Wersja {s} · licencja GPL-3.0-or-later\n" ++
-        "Otwarte narzędzie do identyfikacji sprzętu. Każda wartość ma źródło i pewność.\n" ++
-        "Nazwy urządzeń PCI: PCI ID Repository {s} (GPL-2.0+ lub BSD-3-Clause).\n" ++
-        "Baza CPU: własna HWDB z jawnym pochodzeniem wpisów (bez danych CPU-Z/GPU-Z).", .{ present.version, pci_ver }) catch "";
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const pci_ver = if (pci_embedded.get()) |db| db.version() else i18n.t("niedostępna");
+    const txt = i18n.tf(a, "Wersja {version} · licencja GPL-3.0-or-later\nOtwarte narzędzie do identyfikacji sprzętu. Każda wartość ma źródło i pewność.\nNazwy urządzeń PCI: PCI ID Repository {pci} (GPL-2.0+ lub BSD-3-Clause).\nBaza CPU: własna HWDB z jawnym pochodzeniem wpisów (bez danych CPU-Z/GPU-Z).", .{ .version = present.version, .pci = pci_ver });
     const h = createChild(L("STATIC"), null, 0, st, 0);
     setText(h, txt);
     extra(ix_about, h);
-    extra(ix_about, createChild(L("BUTTON"), L("Raport"), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
-    extra(ix_about, createChild(L("BUTTON"), L("Eksport TXT…"), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_EXPORT_TXT));
-    extra(ix_about, createChild(L("BUTTON"), L("Eksport HTML…"), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_EXPORT_HTML));
-    extra(ix_about, createChild(L("BUTTON"), L("Eksport JSON…"), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_EXPORT_JSON));
-    extra(ix_about, createChild(L("STATIC"), L("Numery seryjne w raporcie są zamaskowane, chyba że zaznaczono „Pokaż numery seryjne”."), 0, st, 0));
-    extra(ix_about, createChild(L("BUTTON"), L("Znaczniki źródeł"), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
-    extra(ix_about, createChild(L("STATIC"), L("Najedź na wartość, aby zobaczyć źródło, pewność i surowe dane.\n" ++
-        "„Pokaż źródła” dodaje znacznik: W wysoka · Ś średnia · N niska pewność · ~ oszacowanie · " ++
-        "Z zaślepka firmware · A wymaga administratora · S wymaga sterownika · – niedostępne."), 0, st, 0));
+    extra(ix_about, createText(L("BUTTON"), i18n.t("Raport"), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
+    extra(ix_about, createText(L("BUTTON"), i18n.t("Eksport TXT…"), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_EXPORT_TXT));
+    extra(ix_about, createText(L("BUTTON"), i18n.t("Eksport HTML…"), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_EXPORT_HTML));
+    extra(ix_about, createText(L("BUTTON"), i18n.t("Eksport JSON…"), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_EXPORT_JSON));
+    extra(ix_about, createText(L("STATIC"), i18n.t("Numery seryjne w raporcie są zamaskowane, chyba że zaznaczono „Pokaż numery seryjne”."), 0, st, 0));
+    extra(ix_about, createText(L("BUTTON"), i18n.t("Znaczniki źródeł"), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
+    extra(ix_about, createText(L("STATIC"), i18n.t("Najedź na wartość, aby zobaczyć źródło, pewność i surowe dane.\n„Pokaż źródła” dodaje znacznik: W wysoka · Ś średnia · N niska pewność · ~ oszacowanie · Z zaślepka firmware · A wymaga administratora · S wymaga sterownika · – niedostępne."), 0, st, 0));
+    // --- Język (prawy górny róg zakładki, w wierszu tytułu; układ w layout()) --
+    app.lang_label = createText(L("STATIC"), i18n.t("Język:"), 0, w.WS_CHILD | w.SS_RIGHT | w.SS_NOPREFIX | w.SS_ENDELLIPSIS, 0);
+    app.lang_combo = createChild(L("COMBOBOX"), null, 0, w.WS_CHILD | w.WS_TABSTOP | w.WS_VSCROLL | w.CBS_DROPDOWNLIST, ID_LANG);
+    if (app.lang_combo) |cb| {
+        // Pozycja na liście = indeks w `i18n.locales`.
+        for (i18n.native_names) |name| {
+            var nb: [64]u16 = undefined;
+            _ = w.SendMessageW(cb, w.CB_ADDSTRING, 0, lp(widen(&nb, name)));
+        }
+        _ = w.SendMessageW(cb, w.CB_SETCURSEL, i18n.indexOf(i18n.locale()) orelse 0, 0);
+    }
     // --- Aktualizacje (logika w update/gui.zig, teksty w update/text.zig) -----
-    const ut = update.text.t;
+    const ut = update.text.get();
     var ub: [512]u16 = undefined;
     extra(ix_about, createChild(L("BUTTON"), widen(&ub, ut.gui_group), 0, w.WS_CHILD | w.BS_GROUPBOX, 0));
     const upd_btn = createChild(L("BUTTON"), widen(&ub, ut.gui_check_button), 0, w.WS_CHILD | w.WS_TABSTOP | w.BS_PUSHBUTTON, update.gui.ID_CHECK);
@@ -476,8 +508,9 @@ fn layoutForm(t: usize, area: w.RECT) void {
     const x0 = area.left;
     const full_width = area.right - area.left;
     if (forms.tabs[t].selector != null) {
-        move(app.sel_label[t], x0 + px(4), y + px(4), px(70), px(20));
-        move(app.sel_combo[t], x0 + px(78), y, @max(px(200), full_width - px(78)), px(300));
+        // Etykieta nieco szersza niż polska — tłumaczenia bywają dłuższe.
+        move(app.sel_label[t], x0 + px(4), y + px(4), px(90), px(20));
+        move(app.sel_combo[t], x0 + px(98), y, @max(px(200), full_width - px(98)), px(300));
         y += px(M.sel_h) + px(4);
     }
     // Komórki i ramki są tworzone w tej samej kolejności co tu iterujemy.
@@ -600,7 +633,7 @@ fn fillSelector(t: usize) void {
     // Pamięć: domyślnie pierwszy OBSADZONY moduł, nie puste gniazdo 0.
     if (app.sel_count[t] == 0 and std.mem.eql(u8, forms.tabs[t].id, "memory")) {
         for (0..n) |i| {
-            const f = forms.resolve(p, .{ .label = "", .sect = "@Gniazdo ", .field = "Moduł" }, i);
+            const f = forms.resolve(p, .{ .label = "", .sect = "@Gniazdo {slot}", .field = "Moduł" }, i);
             if (f == null) {
                 app.sel_index[t] = i;
                 break;
@@ -683,17 +716,26 @@ fn statusText(f: report.Field, buf: []u8) []const u8 {
     return std.fmt.bufPrint(buf, "{s}", .{f.state.label()}) catch "";
 }
 
-fn sourceText(f: report.Field, buf: []u8) []const u8 {
+fn sourceText(f: report.Field, a: std.mem.Allocator) []const u8 {
     const raw = report.shownRaw(f, exportOpts());
-    if (raw.len > 0 and f.note.len > 0) return std.fmt.bufPrint(buf, "{s}  [raw: {s}]  — {s}", .{ f.source, raw, f.note }) catch f.source;
-    if (raw.len > 0) return std.fmt.bufPrint(buf, "{s}  [raw: {s}]", .{ f.source, raw }) catch f.source;
-    if (f.note.len > 0) return std.fmt.bufPrint(buf, "{s}  — {s}", .{ f.source, f.note }) catch f.source;
-    return f.source;
+    if (raw.len == 0 and f.note.len == 0) return f.source;
+    var out: std.ArrayList(u8) = .empty;
+    out.appendSlice(a, f.source) catch {};
+    if (raw.len > 0) {
+        out.appendSlice(a, "  ") catch {};
+        out.appendSlice(a, i18n.tf(a, "[raw: {raw}]", .{ .raw = raw })) catch {};
+    }
+    if (f.note.len > 0) {
+        out.appendSlice(a, "  — ") catch {};
+        out.appendSlice(a, f.note) catch {};
+    }
+    return out.items;
 }
 
 fn sectionVisible(t: usize, title: []const u8) bool {
     const filter = forms.tabs[t].list_sections;
-    return filter.len == 0 or std.mem.startsWith(u8, title, filter);
+    // Filtr jest identyfikatorem katalogu — tytuły sekcji strony są już przetłumaczone.
+    return filter.len == 0 or std.mem.startsWith(u8, title, i18n.t(filter));
 }
 
 fn listCounts(t: usize, p: *const report.Page) struct { rows: usize, sections: usize } {
@@ -736,15 +778,16 @@ fn renderList(t: usize, full: bool) void {
         for (s.fields.items) |f| {
             var vb: [1024]u8 = undefined;
             var sb: [64]u8 = undefined;
-            var srcb: [2048]u8 = undefined;
+            var srcm: [4096]u8 = undefined;
+            var fba = std.heap.FixedBufferAllocator.init(&srcm);
             const value = report.shownValue(f, exportOpts(), &vb);
             const r: i32 = @intCast(row);
             if (redo) {
-                lvAddRow(lv, r, &.{ f.label, value, statusText(f, &sb), sourceText(f, &srcb) }, @intCast(si + 1));
+                lvAddRow(lv, r, &.{ f.label, value, statusText(f, &sb), sourceText(f, fba.allocator()) }, @intCast(si + 1));
             } else {
                 lvSetText(lv, r, 1, value);
                 lvSetText(lv, r, 2, statusText(f, &sb));
-                lvSetText(lv, r, 3, sourceText(f, &srcb));
+                lvSetText(lv, r, 3, sourceText(f, fba.allocator()));
             }
             if (row < row_tone.len) row_tone[row] = .{ valueTone(f), markTone(f) };
             row += 1;
@@ -808,6 +851,8 @@ fn updateVisibility() void {
         show(app.sel_label[i], i == t);
         show(app.sel_combo[i], i == t);
     }
+    show(app.lang_label, t == ix_about);
+    show(app.lang_combo, t == ix_about);
 }
 
 fn refreshCurrent(full: bool) void {
@@ -820,7 +865,7 @@ fn refreshCurrent(full: bool) void {
         updateBadge(t);
     }
     const p = pageOfTab(t);
-    setText(app.ttl, if (p) |pp| (if (pp.headline.len > 0) pp.headline else pp.title) else forms.tabs[t].title);
+    setText(app.ttl, if (p) |pp| (if (pp.headline.len > 0) pp.headline else pp.title) else i18n.t(forms.tabs[t].title));
 }
 
 extern "user32" fn RedrawWindow(w.HWND, ?*const w.RECT, ?*anyopaque, u32) callconv(.winapi) w.BOOL;
@@ -874,18 +919,30 @@ fn exportReport(kind: ExportKind) void {
         .json => L("ferrumscope-report.json"),
     };
     @memcpy(file_buf[0..def.len], def);
-    const filter = switch (kind) {
-        .txt => L("Tekst (*.txt)\x00*.txt\x00\x00"),
-        .html => L("HTML (*.html)\x00*.html\x00\x00"),
-        .json => L("JSON (*.json)\x00*.json\x00\x00"),
+    // Filtr: opis (tłumaczony tylko dla „Tekst”) + wzorzec, zakończone podwójnym zerem.
+    const desc = switch (kind) {
+        .txt => i18n.t("Tekst (*.txt)"),
+        .html => "HTML (*.html)",
+        .json => "JSON (*.json)",
     };
+    const pattern = switch (kind) {
+        .txt => L("*.txt"),
+        .html => L("*.html"),
+        .json => L("*.json"),
+    };
+    var filter: [256]u16 = undefined;
+    const dlen = std.mem.len(widen(filter[0 .. filter.len - pattern.len - 2], desc));
+    @memcpy(filter[dlen + 1 ..][0..pattern.len], pattern);
+    filter[dlen + 1 + pattern.len] = 0;
+    filter[dlen + 2 + pattern.len] = 0;
+    var title_buf: [256]u16 = undefined;
     var ofn: w.OPENFILENAMEW = .{
         .hwndOwner = app.hwnd,
-        .lpstrFilter = filter.ptr,
+        .lpstrFilter = &filter,
         .lpstrFile = &file_buf,
         .nMaxFile = file_buf.len,
         .Flags = w.OFN_OVERWRITEPROMPT | w.OFN_PATHMUSTEXIST | w.OFN_NOCHANGEDIR,
-        .lpstrTitle = L("Eksport raportu FerrumScope"),
+        .lpstrTitle = widen(&title_buf, i18n.t("Eksport raportu FerrumScope")),
     };
     if (w.GetSaveFileNameW(&ofn) == 0) return;
     const end = std.mem.indexOfScalar(u16, &file_buf, 0) orelse file_buf.len;
@@ -909,13 +966,15 @@ fn exportReport(kind: ExportKind) void {
         wr.flush() catch break :blk false;
         break :blk true;
     };
-    var mb: [1200]u8 = undefined;
-    const msg = std.fmt.bufPrint(&mb, "{s}: {s}\nNumery seryjne: {s}.", .{
-        if (ok) "Zapisano raport" else "Nie udało się zapisać raportu",
-        path,
-        if (app.show_serials) "JAWNE (zaznaczona opcja)" else "zamaskowane",
-    }) catch "";
-    var wb: [1300]u16 = undefined;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const serials = if (app.show_serials) i18n.t("JAWNE (zaznaczona opcja)") else i18n.t("zamaskowane");
+    const msg = if (ok)
+        i18n.tf(a, "Zapisano raport: {path}\nNumery seryjne: {serials}.", .{ .path = path, .serials = serials })
+    else
+        i18n.tf(a, "Nie udało się zapisać raportu: {path}\nNumery seryjne: {serials}.", .{ .path = path, .serials = serials });
+    var wb: [2048]u16 = undefined;
     _ = w.MessageBoxW(app.hwnd, widen(&wb, msg), L("FerrumScope"), w.MB_OK | (if (ok) w.MB_ICONINFORMATION else w.MB_ICONWARNING));
     refreshCurrent(true);
 }
@@ -947,7 +1006,16 @@ fn layout() void {
     const ph = r.bottom - r.top;
     const pad = px(8);
     const ttl_h = px(26);
-    move(app.ttl, pad, px(4), pw - 2 * pad, ttl_h);
+    if (app.current == ix_about) {
+        // Wybór języka w prawym górnym rogu zakładki „O programie” (wiersz tytułu
+        // jest tu krótki, a ramki poniżej wypełniają już całą wysokość).
+        const combo_w = px(170);
+        const label_w = px(110);
+        const right = pw - pad;
+        move(app.lang_combo, right - combo_w, px(4), combo_w, px(300));
+        move(app.lang_label, right - combo_w - px(6) - label_w, px(8), label_w, px(20));
+        move(app.ttl, pad, px(4), @max(px(60), pw - 2 * pad - combo_w - label_w - px(12)), ttl_h);
+    } else move(app.ttl, pad, px(4), pw - 2 * pad, ttl_h);
     const area: w.RECT = .{ .left = pad, .top = px(6) + ttl_h, .right = pw - pad, .bottom = ph - pad };
     move(app.lv, area.left, area.top, area.right - area.left, area.bottom - area.top);
     const t = app.current;
@@ -958,10 +1026,11 @@ fn layout() void {
     }
     // Pasek dolny.
     const by = rc.bottom - m - bar_h;
-    move(app.btn_refresh, m, by, px(96), bar_h);
-    move(app.chk_sources, m + px(108), by, px(118), bar_h);
-    move(app.chk_serials, m + px(230), by, px(170), bar_h);
-    move(app.chk_list, m + px(404), by, px(150), bar_h);
+    // Szerokości z zapasem na dłuższe tłumaczenia (np. niemieckie).
+    move(app.btn_refresh, m, by, px(110), bar_h);
+    move(app.chk_sources, m + px(120), by, px(130), bar_h);
+    move(app.chk_serials, m + px(254), by, px(184), bar_h);
+    move(app.chk_list, m + px(442), by, px(180), bar_h);
     applyColumnWidths();
 }
 
@@ -995,7 +1064,7 @@ fn wndProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.win
                     return 0;
                 }
                 if (cellByHwnd(hdr.idFrom)) |c| {
-                    if (fieldOfCell(c)) |f| di.lpszText = tipText(f.*) else di.lpszText = L("Brak tego pola w danych tej maszyny.");
+                    if (fieldOfCell(c)) |f| di.lpszText = tipText(f.*) else di.lpszText = widen(&tip_buf, i18n.t("Brak tego pola w danych tej maszyny."));
                 }
                 return 0;
             }
@@ -1013,6 +1082,13 @@ fn wndProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.win
                     const s = w.SendMessageW(app.sel_combo[t].?, w.CB_GETCURSEL, 0, 0);
                     if (s >= 0) app.sel_index[t] = @intCast(s);
                     refreshCurrent(true);
+                }
+                return 0;
+            }
+            if (id == ID_LANG) {
+                if (code == w.CBN_SELCHANGE) {
+                    const s = w.SendMessageW(app.lang_combo.?, w.CB_GETCURSEL, 0, 0);
+                    if (s >= 0 and s < i18n.locales.len) switchLanguage(hwnd, i18n.locales[@intCast(s)]);
                 }
                 return 0;
             }
@@ -1133,8 +1209,74 @@ fn argTab(cmd: []const u16) ?usize {
     return forms.tabIndex(buf[0..n]);
 }
 
+/// Wartość flagi `--lang=<kod>` (ASCII) w `buf`; pusty = brak flagi.
+fn argLang(cmd: []const u16, buf: []u8) []const u8 {
+    const key = L("--lang=");
+    const at = std.mem.indexOf(u16, cmd, key) orelse return "";
+    const rest = cmd[at + key.len ..];
+    var n: usize = 0;
+    while (n < rest.len and n < buf.len and rest[n] != ' ' and rest[n] != '"' and rest[n] < 128) : (n += 1) buf[n] = @intCast(rest[n]);
+    return buf[0..n];
+}
+
+/// Zmiana języka z listy na zakładce „O programie”.
+///
+/// Sposób: zapis `language` w `data\settings.ini`, a potem ponowne
+/// uruchomienie programu (ta sama ścieżka, te same argumenty, ale z
+/// `--lang=<kod> --tab=about`; bez `--post-update=`) i zamknięcie bieżącego
+/// okna zwykłą drogą (DestroyWindow → WM_DESTROY, jak przy zamknięciu przez
+/// użytkownika — stan i wątki w tle kończą się tak samo). Przebudowa całego
+/// interfejsu w nowym procesie jest prostsza i pewniejsza niż podmiana
+/// tekstów setek kontrolek w miejscu (strony raportu też są budowane
+/// w wybranym języku).
+fn switchLanguage(hwnd: w.HWND, code: []const u8) void {
+    if (std.mem.eql(u8, code, i18n.locale())) return;
+    var s = settings.load();
+    s.language = code;
+    settings.save(s) catch {};
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const ok = blk: {
+        var pb: [std.fs.max_path_bytes]u8 = undefined;
+        const exe = std.fs.selfExePath(&pb) catch break :blk false;
+        var argv: std.ArrayList([]const u8) = .empty;
+        argv.append(a, exe) catch break :blk false;
+        const args = std.process.argsAlloc(a) catch break :blk false;
+        for (args[1..]) |arg| {
+            if (std.mem.startsWith(u8, arg, "--lang=") or std.mem.startsWith(u8, arg, "--tab=") or
+                std.mem.startsWith(u8, arg, "--post-update=")) continue;
+            argv.append(a, arg) catch break :blk false;
+        }
+        argv.append(a, std.fmt.allocPrint(a, "--lang={s}", .{code}) catch break :blk false) catch break :blk false;
+        argv.append(a, "--tab=about") catch break :blk false;
+        var child = std.process.Child.init(argv.items, a);
+        child.stdin_behavior = .Ignore;
+        child.stdout_behavior = .Ignore;
+        child.stderr_behavior = .Ignore;
+        child.spawn() catch break :blk false;
+        break :blk true;
+    };
+    if (!ok) {
+        var wb: [512]u16 = undefined;
+        _ = w.MessageBoxW(hwnd, widen(&wb, i18n.t("Nie udało się uruchomić programu ponownie. Nowy język zostanie użyty przy następnym uruchomieniu.")), L("FerrumScope"), w.MB_OK | w.MB_ICONWARNING);
+        return;
+    }
+    _ = DestroyWindow(hwnd);
+}
+
+extern "user32" fn DestroyWindow(w.HWND) callconv(.winapi) w.BOOL;
+
 pub fn wWinMain(inst: w.HINSTANCE, _: ?w.HINSTANCE, cmd_ptr: [*:0]u16, show_cmd: c_int) c_int {
     const cmd = std.mem.span(cmd_ptr);
+    // Język przed utworzeniem jakiegokolwiek okna: --lang= → settings.ini → Windows.
+    i18n.setSources(&locale_sources);
+    var lang_buf: [32]u8 = undefined;
+    var explicit = argLang(cmd, &lang_buf);
+    if (explicit.len == 0) explicit = settings.load().language;
+    i18n.setLocale(i18n_system.resolve(explicit));
+
     const icc: w.INITCOMMONCONTROLSEX = .{ .dwICC = w.ICC_LISTVIEW_CLASSES | w.ICC_TAB_CLASSES | w.ICC_BAR_CLASSES | w.ICC_STANDARD_CLASSES };
     _ = w.InitCommonControlsEx(&icc);
 
@@ -1177,19 +1319,20 @@ pub fn wWinMain(inst: w.HINSTANCE, _: ?w.HINSTANCE, cmd_ptr: [*:0]u16, show_cmd:
     const ex = w.LVS_EX_FULLROWSELECT | w.LVS_EX_DOUBLEBUFFER | w.LVS_EX_LABELTIP;
     _ = w.SendMessageW(app.lv.?, w.LVM_SETEXTENDEDLISTVIEWSTYLE, ex, ex);
     _ = w.SetWindowTheme(app.lv.?, L("Explorer"), null);
-    lvAddColumn(app.lv.?, 0, L("Pole"), col_widths[0]);
-    lvAddColumn(app.lv.?, 1, L("Wartość"), col_widths[1]);
-    lvAddColumn(app.lv.?, 2, L("Pewność / stan"), col_widths[2]);
-    lvAddColumn(app.lv.?, 3, L("Źródło / surowe dane"), 300);
+    var cb: [128]u16 = undefined;
+    lvAddColumn(app.lv.?, 0, widen(&cb, i18n.t("Pole")), col_widths[0]);
+    lvAddColumn(app.lv.?, 1, widen(&cb, i18n.t("Wartość")), col_widths[1]);
+    lvAddColumn(app.lv.?, 2, widen(&cb, i18n.t("Pewność / stan")), col_widths[2]);
+    lvAddColumn(app.lv.?, 3, widen(&cb, i18n.t("Źródło / surowe dane")), 300);
 
     createForms();
     createBadges(inst);
     create_parent = null;
     const bstyle = w.WS_CHILD | w.WS_VISIBLE | w.WS_TABSTOP;
-    app.btn_refresh = createChild(L("BUTTON"), L("Odśwież (F5)"), 0, bstyle | w.BS_PUSHBUTTON, ID_REFRESH);
-    app.chk_sources = createChild(L("BUTTON"), L("Pokaż źródła"), 0, bstyle | w.BS_AUTOCHECKBOX, ID_SOURCES);
-    app.chk_serials = createChild(L("BUTTON"), L("Pokaż numery seryjne"), 0, bstyle | w.BS_AUTOCHECKBOX, ID_SERIALS);
-    app.chk_list = createChild(L("BUTTON"), L("Pełna lista (Ctrl+L)"), 0, bstyle | w.BS_AUTOCHECKBOX, ID_LISTVIEW);
+    app.btn_refresh = createText(L("BUTTON"), i18n.t("Odśwież (F5)"), 0, bstyle | w.BS_PUSHBUTTON, ID_REFRESH);
+    app.chk_sources = createText(L("BUTTON"), i18n.t("Pokaż źródła"), 0, bstyle | w.BS_AUTOCHECKBOX, ID_SOURCES);
+    app.chk_serials = createText(L("BUTTON"), i18n.t("Pokaż numery seryjne"), 0, bstyle | w.BS_AUTOCHECKBOX, ID_SERIALS);
+    app.chk_list = createText(L("BUTTON"), i18n.t("Pełna lista (Ctrl+L)"), 0, bstyle | w.BS_AUTOCHECKBOX, ID_LISTVIEW);
 
     // Tab control na dno kolejności Z: inaczej zamalowałby rodzeństwo.
     _ = w.SetWindowPos(app.tab.?, @ptrFromInt(1), 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE);
@@ -1197,7 +1340,7 @@ pub fn wWinMain(inst: w.HINSTANCE, _: ?w.HINSTANCE, cmd_ptr: [*:0]u16, show_cmd:
     applyRowHeight();
     for (forms.tabs, 0..) |t, i| {
         var wb: [64]u16 = undefined;
-        var ti: w.TCITEMW = .{ .mask = w.TCIF_TEXT, .pszText = widen(&wb, t.title) };
+        var ti: w.TCITEMW = .{ .mask = w.TCIF_TEXT, .pszText = widen(&wb, i18n.t(t.title)) };
         _ = w.SendMessageW(app.tab.?, w.TCM_INSERTITEMW, i, lp(&ti));
     }
 
@@ -1262,7 +1405,7 @@ const BadgeView = struct {
     key_len: usize = 0,
     img: ?image.Image = null,
     /// Skąd pochodzi obraz (do podpowiedzi).
-    src_buf: [320]u8 = undefined,
+    src_buf: [640]u8 = undefined,
     src_len: usize = 0,
 };
 var badges: [2]BadgeView = .{ .{}, .{} };
@@ -1313,7 +1456,9 @@ fn imagesDir(buf: []u8) ?[]const u8 {
 }
 
 fn setSrc(bv: *BadgeView, s: []const u8) void {
-    const n = @min(s.len, bv.src_buf.len);
+    var n = @min(s.len, bv.src_buf.len);
+    // Nie tniemy w środku znaku UTF-8 (tłumaczenia bywają dłuższe).
+    while (n > 0 and n < s.len and (s[n] & 0xC0) == 0x80) n -= 1;
     @memcpy(bv.src_buf[0..n], s[0..n]);
     bv.src_len = n;
 }
@@ -1337,8 +1482,10 @@ fn loadBadgeImage(bv: *BadgeView) void {
             var wb: [1200]u16 = undefined;
             if (image.loadFile(widen(&wb, full), bw, bh)) |img| {
                 bv.img = img;
-                var sb: [320]u8 = undefined;
-                setSrc(bv, std.fmt.bufPrint(&sb, "Obraz użytkownika: data\\images\\{s}", .{rel}) catch "obraz użytkownika");
+                var arena = std.heap.ArenaAllocator.init(gpa);
+                defer arena.deinit();
+                const ba = arena.allocator();
+                setSrc(bv, i18n.tf(ba, "Obraz użytkownika: data\\images\\{file}", .{ .file = rel }));
                 return;
             }
         }
@@ -1351,14 +1498,16 @@ fn loadBadgeImage(bv: *BadgeView) void {
             if (!std.mem.eql(u8, l.name, k)) continue;
             if (image.loadMemory(l.bytes, bw, bh)) |img| {
                 bv.img = img;
-                var sb: [320]u8 = undefined;
-                setSrc(bv, std.fmt.bufPrint(&sb, "Logo: assets/logos/{s}.png (Wikimedia Commons, public domain; znak towarowy właściciela, użyty do identyfikacji)", .{k}) catch "logo");
+                var arena = std.heap.ArenaAllocator.init(gpa);
+                defer arena.deinit();
+                const ba = arena.allocator();
+                setSrc(bv, i18n.tf(ba, "Logo: assets/logos/{name}.png (Wikimedia Commons, public domain; znak towarowy właściciela, użyty do identyfikacji)", .{ .name = k }));
                 return;
             }
         }
     }
     // 3. Rysowana plakietka.
-    setSrc(bv, "Plakietka rysowana przez FerrumScope (brak logo dla tej serii/producenta)");
+    setSrc(bv, i18n.t("Plakietka rysowana przez FerrumScope (brak logo dla tej serii/producenta)"));
 }
 
 fn updateBadge(t: usize) void {
@@ -1370,14 +1519,14 @@ fn updateBadge(t: usize) void {
             badge.fromCpu(&nt, badgeField(p, "Procesor", "Producent", 0), badgeField(p, "Procesor", "Brand string", 0));
         } else {
             const idx = app.sel_index[t];
-            const id = badgeField(p, "@GPU: ", "Identyfikator", idx);
+            const id = badgeField(p, "@GPU: {name}", "Identyfikator", idx);
             var vid: u16 = 0;
             var did: u16 = 0;
             if (id.len == 9 and id[4] == ':') {
                 vid = std.fmt.parseInt(u16, id[0..4], 16) catch 0;
                 did = std.fmt.parseInt(u16, id[5..9], 16) catch 0;
             }
-            badge.fromGpu(&nt, vid, did, badgeField(p, "@GPU: ", "Nazwa (sterownik)", idx));
+            badge.fromGpu(&nt, vid, did, badgeField(p, "@GPU: {name}", "Nazwa (sterownik)", idx));
         }
         var kb: [256]u8 = undefined;
         const key = std.fmt.bufPrint(&kb, "{s}|{s}|{s}|{x}|{x}|{d}", .{ nt.badge.vendor, nt.badge.series, nt.badge.model, nt.badge.vid, nt.badge.did, app.dpi }) catch "";
@@ -1483,9 +1632,9 @@ fn paintBadge(hwnd: w.HWND, bv: *BadgeView) void {
 
 fn badgeLink(bv: *const BadgeView) ?*const report.Link {
     const p = pageOfTab(bv.tab) orelse return null;
-    if (bv.kind == .cpu) return forms.findLink(p, "Szukaj CPU", "");
-    const scope = forms.instanceName(p, "GPU: ", app.sel_index[bv.tab]) orelse "";
-    return forms.findLink(p, "Szukaj karty", scope);
+    if (bv.kind == .cpu) return forms.findLink(p, "cpu_search", "");
+    const scope = forms.instanceName(p, "GPU: {name}", app.sel_index[bv.tab]) orelse "";
+    return forms.findLink(p, "gpu_search", scope);
 }
 
 fn badgeProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.winapi) w.LRESULT {
@@ -1528,8 +1677,8 @@ fn createBadges(inst: w.HINSTANCE) void {
 }
 
 fn badgeTip(bv: *const BadgeView) [*:0]const u16 {
-    var b: [512]u8 = undefined;
-    const s = std.fmt.bufPrint(&b, "{s}\nKliknij: wyszukaj w bazie TechPowerUp (otwiera przeglądarkę).", .{bv.src_buf[0..bv.src_len]}) catch "";
+    var b: [1024]u8 = undefined;
+    const s = std.fmt.bufPrint(&b, "{s}\n{s}", .{ bv.src_buf[0..bv.src_len], i18n.t("Kliknij: wyszukaj w bazie TechPowerUp (otwiera przeglądarkę).") }) catch bv.src_buf[0..bv.src_len];
     return widen(&tip_buf, s);
 }
 
@@ -1565,26 +1714,30 @@ fn pinFromClipboard(c: *const CellCtl) void {
     var pci: []const u8 = "";
     var pb: [16]u8 = undefined;
     if (gpu) {
-        model_key = lookup.normalizeGpu(&mb, badgeField(p, "@GPU: ", "Nazwa (sterownik)", idx));
-        const id = badgeField(p, "@GPU: ", "Identyfikator", idx);
+        model_key = lookup.normalizeGpu(&mb, badgeField(p, "@GPU: {name}", "Nazwa (sterownik)", idx));
+        const id = badgeField(p, "@GPU: {name}", "Identyfikator", idx);
         if (id.len == 9) pci = std.ascii.lowerString(&pb, id);
     } else {
         model_key = lookup.normalizeCpu(&mb, badgeField(p, "Procesor", "Brand string", 0));
     }
     var cb: [2048]u8 = undefined;
     const url = clipboardText(&cb);
-    var msg_b: [1500]u8 = undefined;
-    var wb: [1600]u16 = undefined;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var wb: [4096]u16 = undefined;
+    var tb: [128]u16 = undefined;
+    const title = widen(&tb, i18n.t("FerrumScope — przypnij link"));
     if (!lookup.validUrl(url)) {
-        const msg = std.fmt.bufPrint(&msg_b, "Skopiuj do schowka adres strony tego modelu (https, techpowerup.com albo strona producenta), np. z paska przeglądarki, i kliknij „Przypnij…” ponownie.\n\nModel: {s}", .{model_key}) catch "";
-        _ = w.MessageBoxW(app.hwnd, widen(&wb, msg), L("FerrumScope — przypnij link"), w.MB_OK | w.MB_ICONINFORMATION);
+        const msg = i18n.tf(a, "Skopiuj do schowka adres strony tego modelu (https, techpowerup.com albo strona producenta), np. z paska przeglądarki, i kliknij „Przypnij…” ponownie.\n\nModel: {model}", .{ .model = model_key });
+        _ = w.MessageBoxW(app.hwnd, widen(&wb, msg), title, w.MB_OK | w.MB_ICONINFORMATION);
         return;
     }
-    const msg = std.fmt.bufPrint(&msg_b, "Przypiąć ten adres dla „{s}”?\n\n{s}\n\nZapis: data\\links.toml obok programu (ma pierwszeństwo przed wbudowaną tabelą).", .{ model_key, url }) catch "";
+    const msg = i18n.tf(a, "Przypiąć ten adres dla „{model}”?\n\n{url}\n\nZapis: data\\links.toml obok programu (ma pierwszeństwo przed wbudowaną tabelą).", .{ .model = model_key, .url = url });
     const MB_YESNO: u32 = 0x4;
-    if (w.MessageBoxW(app.hwnd, widen(&wb, msg), L("FerrumScope — przypnij link"), MB_YESNO | w.MB_ICONINFORMATION) != 6) return;
+    if (w.MessageBoxW(app.hwnd, widen(&wb, msg), title, MB_YESNO | w.MB_ICONINFORMATION) != 6) return;
     st.pinLink(if (gpu) .gpu else .cpu, model_key, pci, url) catch {
-        _ = w.MessageBoxW(app.hwnd, L("Nie udało się zapisać data\\links.toml."), L("FerrumScope"), w.MB_OK | w.MB_ICONWARNING);
+        _ = w.MessageBoxW(app.hwnd, widen(&wb, i18n.t("Nie udało się zapisać data\\links.toml.")), L("FerrumScope"), w.MB_OK | w.MB_ICONWARNING);
         return;
     };
     refreshCurrent(true);

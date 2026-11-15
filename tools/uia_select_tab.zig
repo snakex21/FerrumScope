@@ -9,7 +9,9 @@
 //! rozpoznaje kontrolek Win32 bez działających proxy po stronie klienta —
 //! natywny UIA ma je wbudowane.
 //!
-//! Użycie: uia-select-tab <hwnd dziesiętnie> <nazwa zakładki>
+//! Użycie: uia-select-tab <hwnd dziesiętnie> <nazwa zakładki | #indeks>
+//! `#3` wybiera czwartą zakładkę (indeks od 0) niezależnie od języka
+//! interfejsu — do zrzutów ekranu w dowolnym języku.
 //! Kod wyjścia: 0 = wybrano, 1 = błąd UIA, 2 = brak zakładki, 3 = złe argumenty.
 
 const std = @import("std");
@@ -56,6 +58,11 @@ pub fn main() !u8 {
     const args = try std.process.argsAlloc(arena.allocator());
     if (args.len < 3) return 3;
     const hwnd_val = std.fmt.parseInt(usize, args[1], 10) catch return 3;
+    // `#n` = zakładka o indeksie n (kolejność UIA = kolejność zakładek).
+    const want_index: ?i32 = if (args[2].len > 1 and args[2][0] == '#')
+        (std.fmt.parseInt(i32, args[2][1..], 10) catch return 3)
+    else
+        null;
     const want = try std.unicode.utf8ToUtf16LeAlloc(arena.allocator(), args[2]);
 
     _ = CoInitializeEx(null, 2);
@@ -90,11 +97,15 @@ pub fn main() !u8 {
         if (method(arr, *const fn (*ComObj, i32, *?*anyopaque) callconv(.winapi) HRESULT, 4)(arr, i, &el_ptr) < 0) continue;
         const el: *ComObj = @ptrCast(@alignCast(el_ptr.?));
         defer release(el);
-        var name: ?[*]const u16 = null;
-        if (method(el, *const fn (*ComObj, *?[*]const u16) callconv(.winapi) HRESULT, 23)(el, &name) < 0) continue;
-        defer SysFreeString(name);
-        const n = SysStringLen(name);
-        if (name == null or !std.mem.eql(u16, name.?[0..n], want)) continue;
+        if (want_index) |wi| {
+            if (i != wi) continue;
+        } else {
+            var name: ?[*]const u16 = null;
+            if (method(el, *const fn (*ComObj, *?[*]const u16) callconv(.winapi) HRESULT, 23)(el, &name) < 0) continue;
+            defer SysFreeString(name);
+            const n = SysStringLen(name);
+            if (name == null or !std.mem.eql(u16, name.?[0..n], want)) continue;
+        }
 
         var pat_unk: ?*anyopaque = null;
         if (method(el, *const fn (*ComObj, i32, *?*anyopaque) callconv(.winapi) HRESULT, 16)(el, UIA_SelectionItemPatternId, &pat_unk) < 0 or pat_unk == null) return 1;

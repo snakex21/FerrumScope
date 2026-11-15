@@ -6,7 +6,7 @@
 const std = @import("std");
 const upd = @import("update.zig");
 const settings = @import("../settings.zig");
-const t = upd.text.t;
+const text = upd.text;
 
 pub const exit_up_to_date: u8 = 0;
 pub const exit_available: u8 = 10;
@@ -23,6 +23,7 @@ pub fn run(alloc: std.mem.Allocator, args: []const [:0]const u8, out: *std.Io.Wr
 const channel_flag = "--channel=";
 
 pub fn channelName(c: upd.Channel) []const u8 {
+    const t = text.get();
     return switch (c) {
         .stable => t.channel_stable,
         .@"test" => t.channel_test,
@@ -35,6 +36,7 @@ fn has(args: []const [:0]const u8, flag: []const u8) bool {
 }
 
 fn runInner(alloc: std.mem.Allocator, args: []const [:0]const u8, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
+    const t = text.get();
     if (args.len == 0 or has(args, "-h") or has(args, "--help")) {
         try out.writeAll(t.cli_usage);
         return if (args.len == 0) exit_usage else 0;
@@ -60,10 +62,12 @@ fn runInner(alloc: std.mem.Allocator, args: []const [:0]const u8, out: *std.Io.W
         var s = settings.load();
         s.update_channel = ch;
         settings.save(s) catch |e| {
-            try err.print("{s}{s}\n", .{ t.settings_failed, @errorName(e) });
+            try text.write(err, t.settings_failed, .{ .err = @errorName(e) });
+            try err.writeAll("\n");
             return exit_error;
         };
-        try out.print("{s}{s}\n", .{ t.channel_set, channelName(ch) });
+        try text.write(out, t.channel_set, .{ .channel = channelName(ch) });
+        try out.writeAll("\n");
         return 0;
     }
     if (std.mem.eql(u8, cmd, "--rollback") and args.len == 1) return cmdRollback(out, err);
@@ -74,7 +78,8 @@ fn runInner(alloc: std.mem.Allocator, args: []const [:0]const u8, out: *std.Io.W
         var s = settings.load();
         s.update_check = on;
         settings.save(s) catch |e| {
-            try err.print("{s}{s}\n", .{ t.settings_failed, @errorName(e) });
+            try text.write(err, t.settings_failed, .{ .err = @errorName(e) });
+            try err.writeAll("\n");
             return exit_error;
         };
         try out.print("{s}\n", .{if (on) t.auto_on else t.auto_off});
@@ -84,31 +89,40 @@ fn runInner(alloc: std.mem.Allocator, args: []const [:0]const u8, out: *std.Io.W
 }
 
 fn badOption(err: *std.Io.Writer, what: []const u8) u8 {
-    err.print("{s}{s}\n\n{s}", .{ t.cli_bad_option, what, t.cli_usage }) catch {};
+    const t = text.get();
+    text.write(err, t.cli_bad_option, .{ .option = what }) catch {};
+    err.print("\n\n{s}", .{t.cli_usage}) catch {};
     return exit_usage;
 }
 
 fn printChannel(out: *std.Io.Writer, channel: upd.Channel) !void {
-    try out.print("{s}{s}\n", .{ t.channel_label, channelName(channel) });
+    try text.write(out, text.get().channel_label, .{ .channel = channelName(channel) });
+    try out.writeAll("\n");
 }
 
 fn printInfo(out: *std.Io.Writer, m: *const upd.manifest.Manifest) !void {
-    try out.print("{s}{s}\n{s}{s}", .{ t.current_version, upd.version.current, t.latest_version, m.version });
+    const t = text.get();
+    try text.write(out, t.current_version, .{ .version = upd.version.current });
+    try out.writeAll("\n");
+    try text.write(out, t.latest_version, .{ .version = m.version });
     if (m.published.len > 0) try out.print(" ({s})", .{m.published});
     try out.writeAll("\n");
     if (m.notes.len > 0) try out.print("\n{s}\n{s}\n", .{ t.notes_header, std.mem.trimRight(u8, m.notes, " \r\n") });
 }
 
 fn cmdCheck(alloc: std.mem.Allocator, channel: upd.Channel, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
+    const t = text.get();
     try printChannel(out, channel);
     var c = upd.check(alloc, channel) catch |e| {
-        try err.print("{s}{s}\n", .{ t.check_failed, @errorName(e) });
+        try text.write(err, t.check_failed, .{ .err = @errorName(e) });
+        try err.writeAll("\n");
         return exit_error;
     };
     defer c.deinit();
     switch (c) {
         .no_releases => {
-            try out.print("{s}{s}\n{s}\n", .{ t.current_version, upd.version.current, t.no_releases });
+            try text.write(out, t.current_version, .{ .version = upd.version.current });
+            try out.print("\n{s}\n", .{t.no_releases});
             return exit_up_to_date;
         },
         .up_to_date => |*m| {
@@ -125,7 +139,7 @@ fn cmdCheck(alloc: std.mem.Allocator, channel: upd.Channel, out: *std.Io.Writer,
 }
 
 fn askYes(out: *std.Io.Writer) bool {
-    out.writeAll(t.prompt_install) catch return false;
+    out.writeAll(text.get().prompt_install) catch return false;
     out.flush() catch return false;
     var buf: [64]u8 = undefined;
     var r = std.fs.File.stdin().reader(&buf);
@@ -136,9 +150,11 @@ fn askYes(out: *std.Io.Writer) bool {
 }
 
 fn cmdApply(alloc: std.mem.Allocator, channel: upd.Channel, yes: bool, out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
+    const t = text.get();
     try printChannel(out, channel);
     var c = upd.check(alloc, channel) catch |e| {
-        try err.print("{s}{s}\n", .{ t.check_failed, @errorName(e) });
+        try text.write(err, t.check_failed, .{ .err = @errorName(e) });
+        try err.writeAll("\n");
         return exit_error;
     };
     defer c.deinit();
@@ -167,19 +183,23 @@ fn cmdApply(alloc: std.mem.Allocator, channel: upd.Channel, yes: bool, out: *std
     defer dir.close();
     upd.apply.cleanupLeftovers(dir);
     upd.apply.prepare(alloc, dir, m) catch |e| {
-        try err.print("{s}{s}\n", .{ t.prepare_failed, @errorName(e) });
+        try text.write(err, t.prepare_failed, .{ .err = @errorName(e) });
+        try err.writeAll("\n");
         return exit_error;
     };
     _ = upd.apply.commit(dir, .{}) catch |e| {
         upd.apply.removeStage(dir);
-        try err.print("{s}{s}\n", .{ t.apply_failed, @errorName(e) });
+        try text.write(err, t.apply_failed, .{ .err = @errorName(e) });
+        try err.writeAll("\n");
         return exit_error;
     };
-    try out.print("{s}{s}.\n{s}\n{s}\n", .{ t.applied, m.version, t.backup_hint, t.restart_gui_hint });
+    try text.write(out, t.applied, .{ .version = m.version });
+    try out.print("\n{s}\n{s}\n", .{ t.backup_hint, t.restart_gui_hint });
     return 0;
 }
 
 fn cmdRollback(out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
+    const t = text.get();
     var dir = try upd.apply.openAppDir();
     defer dir.close();
     upd.apply.cleanupLeftovers(dir);
@@ -189,11 +209,13 @@ fn cmdRollback(out: *std.Io.Writer, err: *std.Io.Writer) !u8 {
             return exit_error;
         },
         else => {
-            try err.print("{s}{s}\n", .{ t.rollback_failed, @errorName(e) });
+            try text.write(err, t.rollback_failed, .{ .err = @errorName(e) });
+            try err.writeAll("\n");
             return exit_error;
         },
     };
-    try out.print("{s}{d}\n{s}\n", .{ t.rollback_done, n, t.restart_gui_hint });
+    try text.write(out, t.rollback_done, .{ .count = n });
+    try out.print("\n{s}\n", .{t.restart_gui_hint});
     return 0;
 }
 

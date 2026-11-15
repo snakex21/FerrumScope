@@ -20,7 +20,7 @@ const std = @import("std");
 const w = @import("../gui/win32.zig");
 const upd = @import("update.zig");
 const settings = @import("../settings.zig");
-const t = upd.text.t;
+const text = upd.text;
 
 const L = std.unicode.utf8ToUtf16LeStringLiteral;
 const gpa = std.heap.page_allocator;
@@ -108,7 +108,8 @@ pub fn onStart(hwnd: w.HWND, cmd: []const u16) void {
             upd.apply.cleanupLeftovers(dir);
             dir.close();
         } else |_| {}
-        box(hwnd, &.{ t.gui_updated, upd.version.current, "." }, w.MB_OK | w.MB_ICONINFORMATION);
+        var vb: [512]u8 = undefined;
+        box(hwnd, &.{text.fill(&vb, text.get().gui_updated, .{ .version = upd.version.current })}, w.MB_OK | w.MB_ICONINFORMATION);
         return;
     }
     const s = settings.load();
@@ -200,22 +201,26 @@ fn recordCheck() void {
 }
 
 fn onCheckResult(hwnd: w.HWND, msg: *Msg) void {
+    const t = text.get();
+    var cb: [512]u8 = undefined;
+    var lb: [512]u8 = undefined;
     const manual = msg.job == .manual_check;
     recordCheck();
     if (msg.err) |e| {
         finish();
-        if (manual) box(hwnd, &.{ t.check_failed, @errorName(e) }, w.MB_OK | w.MB_ICONWARNING);
+        if (manual) box(hwnd, &.{text.fill(&cb, t.check_failed, .{ .err = @errorName(e) })}, w.MB_OK | w.MB_ICONWARNING);
         return;
     }
+    const cur = text.fill(&cb, t.current_version, .{ .version = upd.version.current });
     var c = msg.check.?;
     switch (c) {
         .no_releases => {
             finish();
-            if (manual) box(hwnd, &.{ t.current_version, upd.version.current, "\n\n", t.no_releases }, w.MB_OK | w.MB_ICONINFORMATION);
+            if (manual) box(hwnd, &.{ cur, "\n\n", t.no_releases }, w.MB_OK | w.MB_ICONINFORMATION);
         },
         .up_to_date => |m| {
             finish();
-            if (manual) box(hwnd, &.{ t.current_version, upd.version.current, "\n", t.latest_version, m.version, "\n\n", t.up_to_date }, w.MB_OK | w.MB_ICONINFORMATION);
+            if (manual) box(hwnd, &.{ cur, "\n", text.fill(&lb, t.latest_version, .{ .version = m.version }), "\n\n", t.up_to_date }, w.MB_OK | w.MB_ICONINFORMATION);
             c.deinit();
             return;
         },
@@ -225,11 +230,9 @@ fn onCheckResult(hwnd: w.HWND, msg: *Msg) void {
             const yes = askBox(hwnd, &.{
                 t.update_available,
                 "\n\n",
-                t.current_version,
-                upd.version.current,
+                cur,
                 "\n",
-                t.latest_version,
-                m.version,
+                text.fill(&lb, t.latest_version, .{ .version = m.version }),
                 "\n",
                 if (has_notes) "\n" else "",
                 if (has_notes) t.notes_header else "",
@@ -257,23 +260,25 @@ fn onCheckResult(hwnd: w.HWND, msg: *Msg) void {
 }
 
 fn onPrepared(hwnd: w.HWND, err: ?anyerror) void {
+    const t = text.get();
+    var eb: [512]u8 = undefined;
     defer {
         if (pending) |*p| p.deinit();
         pending = null;
         finish();
     }
     if (err) |e| {
-        box(hwnd, &.{ t.prepare_failed, @errorName(e) }, w.MB_OK | w.MB_ICONWARNING);
+        box(hwnd, &.{text.fill(&eb, t.prepare_failed, .{ .err = @errorName(e) })}, w.MB_OK | w.MB_ICONWARNING);
         return;
     }
     var dir = upd.apply.openAppDir() catch |e| {
-        box(hwnd, &.{ t.apply_failed, @errorName(e) }, w.MB_OK | w.MB_ICONWARNING);
+        box(hwnd, &.{text.fill(&eb, t.apply_failed, .{ .err = @errorName(e) })}, w.MB_OK | w.MB_ICONWARNING);
         return;
     };
     defer dir.close();
     _ = upd.apply.commit(dir, .{}) catch |e| {
         upd.apply.removeStage(dir);
-        box(hwnd, &.{ t.apply_failed, @errorName(e) }, w.MB_OK | w.MB_ICONWARNING);
+        box(hwnd, &.{text.fill(&eb, t.apply_failed, .{ .err = @errorName(e) })}, w.MB_OK | w.MB_ICONWARNING);
         return;
     };
     restart(hwnd);
@@ -281,6 +286,7 @@ fn onPrepared(hwnd: w.HWND, err: ?anyerror) void {
 
 /// Start nowej wersji (ta sama ścieżka) z `--post-update=<pid>` i zamknięcie okna.
 fn restart(hwnd: w.HWND) void {
+    const t = text.get();
     var pb: [std.fs.max_path_bytes]u8 = undefined;
     const exe = std.fs.selfExePath(&pb) catch {
         box(hwnd, &.{t.gui_restart_failed}, w.MB_OK | w.MB_ICONWARNING);
@@ -309,7 +315,7 @@ fn boxRaw(hwnd: w.HWND, parts: []const []const u8, flags: u32) i32 {
     for (parts) |p| buf.appendSlice(gpa, p) catch return 0;
     const wide = std.unicode.utf8ToUtf16LeAllocZ(gpa, buf.items) catch return 0;
     defer gpa.free(wide);
-    const caption = std.unicode.utf8ToUtf16LeAllocZ(gpa, t.gui_title) catch return 0;
+    const caption = std.unicode.utf8ToUtf16LeAllocZ(gpa, text.get().gui_title) catch return 0;
     defer gpa.free(caption);
     return w.MessageBoxW(hwnd, wide, caption, flags);
 }

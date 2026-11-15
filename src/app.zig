@@ -8,6 +8,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const ferrum = @import("root.zig");
 const present = @import("present.zig");
+const i18n = @import("i18n/i18n.zig");
 const embedded = @import("db/embedded.zig");
 const pci_embedded = @import("db/pci_embedded.zig");
 
@@ -71,13 +72,16 @@ pub const State = struct {
     snap: snapshot.Snapshot = .{},
 
     cpu_ok: bool = false,
+    /// Powód braku CPU: identyfikator `i18n.N` albo nazwa stanu probe;
+    /// tłumaczony przy budowie strony (język może się zmienić w trakcie).
     cpu_error: []const u8 = "",
     cpu_raw: raw.RawCpuInfo = .{},
     cpu_info: model.CpuInfo = .{},
     outcome: decoder.DecodeOutcome = .unknown,
     hwdb_entries: usize = 0,
     hwdb_revision: u32 = 0,
-    cpu_origin: []const u8 = "CPUID na żywo",
+    /// Nazwa pliku replay. Pusty = „CPUID na żywo” (tłumaczone na stronie).
+    cpu_origin: []const u8 = "",
 
     sampler: if (is_windows) win.cpuload.Sampler else void = undefined,
     sampler_ready: bool = false,
@@ -102,7 +106,8 @@ pub const State = struct {
         s.loadSnapshot();
         // Backend MSR musi istnieć zawsze — strona Czujniki pyta o zdolności.
         s.msr_state.api = present.NoMsrBackend.create();
-        s.msr_state.open_error_text = "pomiary na żywo wyłączone (replay / testy)";
+        // Identyfikator katalogu; tłumaczony przy wyświetleniu (`i18n.t`).
+        s.msr_state.open_error_text = i18n.N("pomiary na żywo wyłączone (replay / testy)");
         if (opts.live and is_windows) s.startLive();
         return s;
     }
@@ -126,7 +131,7 @@ pub const State = struct {
         var res: @TypeOf(probe.run(native.create())) = undefined;
         if (self.opts.cpu_replay) |text| {
             const captured = cpuimg.parse(text) catch {
-                self.cpu_error = "plik .cpuimg jest niepoprawny";
+                self.cpu_error = i18n.N("plik .cpuimg jest niepoprawny");
                 return;
             };
             var rp = replay_mod.Replay.init(captured.image);
@@ -143,7 +148,7 @@ pub const State = struct {
         }
         self.cpu_raw = res.unwrap().?;
         const db = embedded.load() catch {
-            self.cpu_error = "wbudowana baza HWDB jest uszkodzona";
+            self.cpu_error = i18n.N("wbudowana baza HWDB jest uszkodzona");
             return;
         };
         self.hwdb_entries = db.count();
@@ -261,7 +266,7 @@ pub const State = struct {
             .est_max_mhz = s.est_max_mhz,
             .pdh_ok = s.pdh_ok,
         };
-        if (self.msr_state.open_error_text.len > 0) lv.msr_reason = self.msr_state.open_error_text;
+        if (self.msr_state.open_error_text.len > 0) lv.msr_reason = i18n.t(self.msr_state.open_error_text);
         if (self.msr_state.samples) |list| {
             if (present.findSample(list, "cpu.core.effective_frequency")) |smp| {
                 if (smp.get()) |v| lv.msr_effective_mhz = @as(f64, @floatFromInt(v)) / 1e6;
@@ -316,10 +321,12 @@ pub const State = struct {
 
     pub fn cpuPage(self: *State, a: std.mem.Allocator) report.Page {
         if (!self.cpu_ok) {
-            var p: report.Page = .{ .id = "cpu", .title = "CPU", .headline = "Procesor niedostępny" };
+            var p: report.Page = .{ .id = "cpu", .title = "" };
             var b = report.Builder.init(a, &p);
-            b.section("Procesor");
-            b.add(.{ .label = "CPU", .value = "—", .state = .unavailable, .confidence = .unknown, .source = self.cpu_error });
+            p.title = b.t("CPU");
+            p.headline = b.t("Procesor niedostępny");
+            b.section(b.t("Procesor"));
+            b.add(.{ .label = b.t("CPU"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = i18n.t(self.cpu_error) });
             return p;
         }
         return pages_cpu.build(a, .{
@@ -336,19 +343,21 @@ pub const State = struct {
     }
 
     fn sensorsPage(self: *State, a: std.mem.Allocator, ctx: pages_system.Ctx, live: pages_system.GpuLive) report.Page {
-        var p: report.Page = .{ .id = "sensors", .title = "Czujniki" };
+        var p: report.Page = .{ .id = "sensors", .title = "" };
         var b = report.Builder.init(a, &p);
         const m = &self.msr_state;
-        p.headline = if (m.real_open) "Czujniki — sterownik MSR załadowany" else "Czujniki — bez sterownika";
-        p.summary = "Czujniki CPU z MSR wymagają sterownika FerrumScopeMsr (nie jest instalowany automatycznie). GPU i dyski — bez sterownika.";
+        p.title = b.t("Czujniki");
+        p.headline = if (m.real_open) b.t("Czujniki — sterownik MSR załadowany") else b.t("Czujniki — bez sterownika");
+        p.summary = b.t("Czujniki CPU z MSR wymagają sterownika FerrumScopeMsr (nie jest instalowany automatycznie). GPU i dyski — bez sterownika.");
+        const open_error = i18n.t(m.open_error_text);
 
-        b.section("CPU — obciążenie i zegar (bez sterownika)");
+        b.section(b.t("CPU — obciążenie i zegar (bez sterownika)"));
         if (self.liveCpu()) |lv| {
-            if (lv.total_load) |t| b.add(.{ .label = "Obciążenie całkowite", .value = b.fmt("{d:.1} %", .{t}), .source = "NtQuerySystemInformation(SystemProcessorPerformanceInformation)" });
-            if (lv.est_avg_mhz) |f| b.add(.{ .label = "Zegar rdzeni (średnio)", .value = b.fmt("{d:.0} MHz", .{f}), .state = .estimate, .confidence = .medium, .source = "PDH % Processor Performance × zegar bazowy" });
-        } else b.add(.{ .label = "Obciążenie", .value = "—", .state = .unavailable, .confidence = .unknown, .source = "brak pomiaru na żywo (replay albo pierwsza próbka)" });
+            if (lv.total_load) |t| b.add(.{ .label = b.t("Obciążenie całkowite"), .value = b.fmt("{d:.1} %", .{t}), .source = "NtQuerySystemInformation(SystemProcessorPerformanceInformation)" });
+            if (lv.est_avg_mhz) |f| b.add(.{ .label = b.t("Zegar rdzeni (średnio)"), .value = b.fmt("{d:.0} MHz", .{f}), .state = .estimate, .confidence = .medium, .source = b.t("PDH % Processor Performance × zegar bazowy") });
+        } else b.add(.{ .label = b.t("Obciążenie"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.t("brak pomiaru na żywo (replay albo pierwsza próbka)") });
 
-        b.section("CPU — MSR (sterownik FerrumScopeMsr)");
+        b.section(b.t("CPU — MSR (sterownik FerrumScopeMsr)"));
         const caps = m.api.capabilities();
         for (catalog.metrics_available) |metric| {
             const label = if (metric.descriptor.label.len > 0) metric.descriptor.label else metric.descriptor.id;
@@ -367,7 +376,7 @@ pub const State = struct {
             if (!done) {
                 const why = present.reasonFor(metric, caps);
                 const st: report.State = if (m.real_open or metric.descriptor.source == .platform) .unavailable else .requires_driver;
-                b.add(.{ .label = label, .value = "—", .state = st, .confidence = .unknown, .source = if (m.open_error_text.len > 0) b.fmt("{s} ({s})", .{ why, m.open_error_text }) else why });
+                b.add(.{ .label = label, .value = "—", .state = st, .confidence = .unknown, .source = if (open_error.len > 0) b.fmt("{s} ({s})", .{ why, open_error }) else why });
             }
         }
         pages_system.addSensorSections(&b, ctx, live);
@@ -389,7 +398,10 @@ pub const State = struct {
         pages[4] = pages_system.buildStorage(a, ctx);
         pages[5] = self.sensorsPage(a, ctx, live);
         if (self.snap.replay_source) |src| {
-            for (pages[1..5]) |*p| p.summary = std.fmt.allocPrint(a, "REPLAY: {s}{s}. {s}", .{ src, if (self.snap.serials_masked) " (numery seryjne zamaskowane przy capture)" else "", p.summary }) catch p.summary;
+            for (pages[1..5]) |*p| p.summary = if (self.snap.serials_masked)
+                i18n.tf(a, "REPLAY: {source} (numery seryjne zamaskowane przy capture). {summary}", .{ .source = src, .summary = p.summary })
+            else
+                i18n.tf(a, "REPLAY: {source}. {summary}", .{ .source = src, .summary = p.summary });
         }
         return pages;
     }

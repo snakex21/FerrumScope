@@ -33,6 +33,7 @@
 //! Windows x86_64 (jedna konwencja wywołań), na innych zwraca `unsupported_api`.
 
 const std = @import("std");
+const i18n = @import("../../i18n/i18n.zig");
 const builtin = @import("builtin");
 const gv = @import("gpu_vendor.zig");
 
@@ -286,29 +287,29 @@ pub const Session = struct {
     pub fn open(alloc: Allocator) Session {
         var s: Session = .{ .alloc = alloc };
         if (builtin.os.tag != .windows or builtin.cpu.arch != .x86_64) {
-            s.fail(.unsupported_api, "NVAPI: obsługiwany tylko proces Windows x86_64");
+            s.fail(.unsupported_api, i18n.t("NVAPI: obsługiwany tylko proces Windows x86_64"));
             return s;
         }
         s.dll = gv.loadSystemDll(dll_name);
         const h = s.dll orelse {
-            s.fail(.dll_not_found, "NVAPI: brak nvapi64.dll w System32 (brak sterownika NVIDIA)");
+            s.fail(.dll_not_found, i18n.t("NVAPI: brak nvapi64.dll w System32 (brak sterownika NVIDIA)"));
             return s;
         };
         const q = gv.getProc(QueryInterface, h, "nvapi_QueryInterface") orelse {
-            s.fail(.unsupported_api, "NVAPI: brak eksportu nvapi_QueryInterface");
+            s.fail(.unsupported_api, i18n.t("NVAPI: brak eksportu nvapi_QueryInterface"));
             return s;
         };
         s.fns = Fns.load(q);
         const init = s.fns.initialize orelse {
-            s.fail(.unsupported_api, "NVAPI: QueryInterface nie zna NvAPI_Initialize");
+            s.fail(.unsupported_api, i18n.t("NVAPI: QueryInterface nie zna NvAPI_Initialize"));
             return s;
         };
         const rc = init();
         if (rc != NVAPI_OK) {
             if (rc == NVAPI_NVIDIA_DEVICE_NOT_FOUND)
-                s.fail(.no_adapters, "NVAPI: NvAPI_Initialize — brak GPU NVIDIA (NVAPI_NVIDIA_DEVICE_NOT_FOUND)")
+                s.fail(.no_adapters, i18n.t("NVAPI: NvAPI_Initialize — brak GPU NVIDIA (NVAPI_NVIDIA_DEVICE_NOT_FOUND)"))
             else
-                s.fail(.{ .init_failed = rc }, "NVAPI: NvAPI_Initialize zwrócił błąd");
+                s.fail(.{ .init_failed = rc }, i18n.t("NVAPI: NvAPI_Initialize zwrócił błąd"));
             return s;
         }
         s.initialized = true;
@@ -319,15 +320,15 @@ pub const Session = struct {
         }
 
         s.enumerate() catch {
-            s.fail(.{ .init_failed = NVAPI_ERROR }, "NVAPI: brak pamięci przy wyliczaniu GPU");
+            s.fail(.{ .init_failed = NVAPI_ERROR }, i18n.t("NVAPI: brak pamięci przy wyliczaniu GPU"));
             return s;
         };
         if (s.adapters.len == 0) {
-            s.fail(.no_adapters, "NVAPI: NvAPI_EnumPhysicalGPUs nie zwrócił żadnego GPU");
+            s.fail(.no_adapters, i18n.t("NVAPI: NvAPI_EnumPhysicalGPUs nie zwrócił żadnego GPU"));
             return s;
         }
         s.library.status = .available;
-        s.library.reason = "NVAPI: dostępne (zaimplementowane wg SDK, niezweryfikowane na sprzęcie NVIDIA)";
+        s.library.reason = i18n.t("NVAPI: dostępne (zaimplementowane wg SDK, niezweryfikowane na sprzęcie NVIDIA)");
         s.poll();
         return s;
     }

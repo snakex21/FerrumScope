@@ -12,7 +12,10 @@
 #   -NonElevated       okno bez uprawnień administratora (runas /trustlevel:0x20000)
 #   -View list         widok „Pełna lista” (domyślnie: structured)
 #   -Prefix admin_     prefiks nazw plików
-#   -Tabs "Dyski"      tylko wybrane zakładki
+#   -Tabs "storage"    tylko wybrane zakładki (identyfikatory: cpu, caches, board, memory,
+#                      graphics, storage, sensors, bench, about; dawne polskie nazwy też działają)
+#   -Lang en           język interfejsu (przekazywany jako --lang=<kod>); zakładki są wybierane
+#                      po indeksie (uia-select-tab "#n"), więc działa w każdym języku
 param(
     [string]$Exe = "zig-out\bin\ferrumscope-gui.exe",
     [string]$Uia = "zig-out\bin\uia-select-tab.exe",
@@ -20,7 +23,8 @@ param(
     [switch]$NonElevated,
     [ValidateSet("structured", "list")][string]$View = "structured",
     [string]$Prefix = "",
-    [string[]]$Tabs = @("CPU", "Cache", "Płyta główna", "Pamięć", "Grafika", "Dyski", "Czujniki", "Bench", "O programie")
+    [string[]]$Tabs = @("cpu", "caches", "board", "memory", "graphics", "storage", "sensors", "bench", "about"),
+    [string]$Lang = ""
 )
 $ErrorActionPreference = "Stop"
 # -Tabs "A,B" z powershell -File przychodzi jako jeden napis.
@@ -41,6 +45,7 @@ $exePath = (Resolve-Path $Exe).Path
 $uiaPath = (Resolve-Path $Uia).Path
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $viewArg = if ($View -eq "list") { "--list" } else { "--structured" }
+if ($Lang) { $viewArg = "$viewArg --lang=$Lang" }
 $started = Get-Date
 
 if ($NonElevated) {
@@ -65,11 +70,16 @@ $proc.Refresh()
 $h = $proc.MainWindowHandle
 if ($h -eq 0) { throw "okno nie powstało" }
 
+# Kolejność zakładek = src/gui/forms.zig `tabs` (indeks dla UIA "#n").
+$order = @("cpu", "caches", "board", "memory", "graphics", "storage", "sensors", "bench", "about")
 $names = @{ "CPU" = "cpu"; "Cache" = "caches"; "Płyta główna" = "board"; "Pamięć" = "memory"; "Grafika" = "graphics";
             "Dyski" = "storage"; "Czujniki" = "sensors"; "Bench" = "bench"; "O programie" = "about" }
 try {
     foreach ($t in $Tabs) {
-        & $uiaPath ([string][int64]$h) $t
+        $id = if ($names.ContainsKey($t)) { $names[$t] } else { $t }
+        $idx = [array]::IndexOf($order, $id)
+        if ($idx -lt 0) { "nieznana zakładka '$t'"; continue }
+        & $uiaPath ([string][int64]$h) ("#" + $idx)
         if ($LASTEXITCODE -ne 0) { "UIA: nie wybrano zakładki '$t' (kod $LASTEXITCODE)"; continue }
         Start-Sleep -Milliseconds 1800
         $r = New-Object FsWin+RECT
@@ -80,7 +90,7 @@ try {
         $hdc = $g.GetHdc()
         $ok = [FsWin]::PrintWindow($h, $hdc, 2)
         $g.ReleaseHdc($hdc); $g.Dispose()
-        $out = Join-Path $OutDir ("{0}{1}.png" -f $Prefix, $names[$t])
+        $out = Join-Path $OutDir ("{0}{1}.png" -f $Prefix, $id)
         $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
         "zapisano $out ($wd x $ht, PrintWindow=$ok)"
     }

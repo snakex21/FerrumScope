@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const raw = @import("../core/raw.zig");
+const i18n = @import("../i18n/i18n.zig");
 
 pub const Reg = enum { eax, ebx, ecx, edx };
 
@@ -32,15 +33,15 @@ pub const Group = enum {
 
     pub fn label(self: Group) []const u8 {
         return switch (self) {
-            .base => "Podstawowe / 64-bit",
-            .simd => "SIMD (MMX / SSE / AVX)",
-            .avx512 => "AVX-512 / AMX",
-            .crypto => "Kryptografia",
-            .virtualization => "Wirtualizacja",
-            .bitmanip => "Operacje bitowe",
-            .memory => "Pamięć / cache",
-            .security => "Bezpieczeństwo",
-            .other => "Inne",
+            .base => i18n.t("Podstawowe / 64-bit"),
+            .simd => i18n.t("SIMD (MMX / SSE / AVX)"),
+            .avx512 => i18n.t("AVX-512 / AMX"),
+            .crypto => i18n.t("Kryptografia"),
+            .virtualization => i18n.t("Wirtualizacja"),
+            .bitmanip => i18n.t("Operacje bitowe"),
+            .memory => i18n.t("Pamięć / cache"),
+            .security => i18n.t("Bezpieczeństwo"),
+            .other => i18n.t("Inne"),
         };
     }
 };

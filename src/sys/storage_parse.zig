@@ -17,6 +17,7 @@
 //! niedostępne — nigdy odczyt poza zakresem.
 
 const std = @import("std");
+const i18n = @import("../i18n/i18n.zig");
 
 // ---------------------------------------------------------------------------
 // Wspólne typy
@@ -188,7 +189,7 @@ pub const BusType = enum(u32) {
     /// Nazwa jak w dokumentacji Microsoft (bez prefiksu `BusType`).
     pub fn name(self: BusType) []const u8 {
         return switch (self) {
-            .unknown => "Unknown",
+            .unknown => i18n.t("Unknown"),
             .scsi => "SCSI",
             .atapi => "ATAPI",
             .ata => "ATA",
@@ -202,7 +203,7 @@ pub const BusType = enum(u32) {
             .sata => "SATA",
             .sd => "SD",
             .mmc => "MMC",
-            .virtual => "Virtual",
+            .virtual => i18n.t("Virtual"),
             .file_backed_virtual => "FileBackedVirtual",
             .spaces => "Spaces",
             .nvme => "NVMe",
@@ -210,7 +211,7 @@ pub const BusType = enum(u32) {
             .ufs => "UFS",
             .nvmeof => "NVMeoF",
             .max_reserved => "MaxReserved",
-            _ => "Unknown",
+            _ => i18n.t("Unknown"),
         };
     }
 
@@ -391,22 +392,22 @@ pub const nvme_log_size = 512;
 
 /// Nazwy bitów Critical Warning (bajt 0), od bitu 0.
 pub const nvme_critical_warning_names = [_][]const u8{
-    "available spare below threshold",
-    "temperature outside threshold",
-    "NVM subsystem reliability degraded",
-    "media placed in read-only mode",
-    "volatile memory backup device failed",
-    "persistent memory region read-only",
-    "reserved bit 6",
-    "reserved bit 7",
+    i18n.N("available spare below threshold"),
+    i18n.N("temperature outside threshold"),
+    i18n.N("NVM subsystem reliability degraded"),
+    i18n.N("media placed in read-only mode"),
+    i18n.N("volatile memory backup device failed"),
+    i18n.N("persistent memory region read-only"),
+    i18n.N("reserved bit 6"),
+    i18n.N("reserved bit 7"),
 };
 
-/// Zwraca listę nazw ustawionych bitów Critical Warning.
+/// Zwraca listę nazw (przetłumaczonych) ustawionych bitów Critical Warning.
 pub fn nvmeCriticalWarningList(cw: u8, out: *[8][]const u8) []const []const u8 {
     var n: usize = 0;
     for (0..8) |bit| {
         if (cw & (@as(u8, 1) << @intCast(bit)) != 0) {
-            out[n] = nvme_critical_warning_names[bit];
+            out[n] = i18n.t(nvme_critical_warning_names[bit]);
             n += 1;
         }
     }
@@ -494,34 +495,34 @@ pub fn parseNvmeHealthLog(b: []const u8) ParseError!NvmeHealth {
     };
     s.power_on_hours = .{ .value = sat64(h.power_on_hours), .source = "NVMe log 02h, bytes 128..143", .confidence = .high };
     s.power_cycles = .{ .value = sat64(h.power_cycles), .source = "NVMe log 02h, bytes 112..127", .confidence = .high };
-    s.percentage_used = .{ .value = h.percentage_used, .source = "NVMe log 02h, byte 5", .confidence = .high, .note = "may exceed 100" };
+    s.percentage_used = .{ .value = h.percentage_used, .source = "NVMe log 02h, byte 5", .confidence = .high, .note = i18n.t("may exceed 100") };
     s.data_read_bytes = .{
         .value = h.data_units_read *| NvmeHealth.data_unit_bytes,
         .source = "NVMe log 02h, bytes 32..47 (x 512000 B)",
         .confidence = .high,
-        .note = "spec rounds data units up",
+        .note = i18n.t("spec rounds data units up"),
     };
     s.data_written_bytes = .{
         .value = h.data_units_written *| NvmeHealth.data_unit_bytes,
         .source = "NVMe log 02h, bytes 48..63 (x 512000 B)",
         .confidence = .high,
-        .note = "spec rounds data units up",
+        .note = i18n.t("spec rounds data units up"),
     };
     s.unsafe_shutdowns = .{ .value = sat64(h.unsafe_shutdowns), .source = "NVMe log 02h, bytes 144..159", .confidence = .high };
     s.media_errors = .{ .value = sat64(h.media_errors), .source = "NVMe log 02h, bytes 160..175", .confidence = .high };
 
     if (h.critical_warning != 0) {
         s.status = .critical;
-        s.reason = "NVMe critical warning != 0";
+        s.reason = i18n.t("NVMe critical warning != 0");
     } else if (h.percentage_used >= 90) {
         s.status = .warning;
-        s.reason = "NVMe percentage used >= 90";
+        s.reason = i18n.t("NVMe percentage used >= 90");
     } else if (h.available_spare < h.available_spare_threshold) {
         s.status = .warning;
-        s.reason = "NVMe available spare < threshold";
+        s.reason = i18n.t("NVMe available spare < threshold");
     } else {
         s.status = .ok;
-        s.reason = "NVMe critical warning = 0, used < 90, spare >= threshold";
+        s.reason = i18n.t("NVMe critical warning = 0, used < 90, spare >= threshold");
     }
     h.summary = s;
     return h;
@@ -679,17 +680,17 @@ pub const AtaOptions = struct {
 /// Status testu własnego (bajt 363, starsza połówka).
 pub fn ataSelfTestStatusName(v: u8) []const u8 {
     return switch (v >> 4) {
-        0 => "completed without error / never run",
-        1 => "aborted by host",
-        2 => "interrupted by reset",
-        3 => "fatal error",
-        4 => "failed (unknown element)",
-        5 => "failed (electrical element)",
-        6 => "failed (servo/seek element)",
-        7 => "failed (read element)",
-        8 => "failed (handling damage)",
-        15 => "in progress",
-        else => "reserved",
+        0 => i18n.t("completed without error / never run"),
+        1 => i18n.t("aborted by host"),
+        2 => i18n.t("interrupted by reset"),
+        3 => i18n.t("fatal error"),
+        4 => i18n.t("failed (unknown element)"),
+        5 => i18n.t("failed (electrical element)"),
+        6 => i18n.t("failed (servo/seek element)"),
+        7 => i18n.t("failed (read element)"),
+        8 => i18n.t("failed (handling damage)"),
+        15 => i18n.t("in progress"),
+        else => i18n.t("reserved"),
     };
 }
 
@@ -796,7 +797,7 @@ fn deriveAta(r: *const AtaSmart, opts: AtaOptions) HealthSummary {
             .value = t,
             .source = "ATA SMART attr 190 raw[0]",
             .confidence = .medium,
-            .note = "airflow temperature; fallback when 194 is missing",
+            .note = i18n.t("airflow temperature; fallback when 194 is missing"),
         };
     };
 
@@ -804,7 +805,7 @@ fn deriveAta(r: *const AtaSmart, opts: AtaOptions) HealthSummary {
         .value = a.rawLow32(),
         .source = "ATA SMART attr 9 raw[0..3]",
         .confidence = .medium,
-        .note = "some vendors count minutes/seconds or pack extra data in raw[4..5]",
+        .note = i18n.t("some vendors count minutes/seconds or pack extra data in raw[4..5]"),
     };
     if (r.find(12)) |a| s.power_cycles = .{ .value = a.rawLow32(), .source = "ATA SMART attr 12 raw[0..3]", .confidence = .high };
     if (r.find(5)) |a| s.reallocated = .{ .value = a.rawLow32(), .source = "ATA SMART attr 5 raw[0..3]", .confidence = .high };
@@ -814,21 +815,21 @@ fn deriveAta(r: *const AtaSmart, opts: AtaOptions) HealthSummary {
         .value = a.rawLow32(),
         .source = "ATA SMART attr 174 raw[0..3]",
         .confidence = .medium,
-        .note = "SSD vendors only",
+        .note = i18n.t("SSD vendors only"),
     };
 
     if (opts.rotational != true) {
         const Cand = struct { id: u8, source: []const u8, conf: Confidence, note: []const u8 };
         const cands = [_]Cand{
-            .{ .id = 233, .source = "ATA SMART attr 233 current (100 - value)", .conf = .medium, .note = "Intel Media Wearout Indicator; vendor-specific" },
-            .{ .id = 177, .source = "ATA SMART attr 177 current (100 - value)", .conf = .medium, .note = "Samsung Wear Leveling Count; vendor-specific" },
-            .{ .id = 231, .source = "ATA SMART attr 231 current (100 - value)", .conf = .medium, .note = "SSD Life Left (Kingston/SandForce); vendor-specific" },
-            .{ .id = 202, .source = "ATA SMART attr 202 current (100 - value)", .conf = .low, .note = "Micron/Crucial lifetime remaining; vendor-specific" },
+            .{ .id = 233, .source = "ATA SMART attr 233 current (100 - value)", .conf = .medium, .note = i18n.N("Intel Media Wearout Indicator; vendor-specific") },
+            .{ .id = 177, .source = "ATA SMART attr 177 current (100 - value)", .conf = .medium, .note = i18n.N("Samsung Wear Leveling Count; vendor-specific") },
+            .{ .id = 231, .source = "ATA SMART attr 231 current (100 - value)", .conf = .medium, .note = i18n.N("SSD Life Left (Kingston/SandForce); vendor-specific") },
+            .{ .id = 202, .source = "ATA SMART attr 202 current (100 - value)", .conf = .low, .note = i18n.N("Micron/Crucial lifetime remaining; vendor-specific") },
         };
         for (cands) |c| {
             const a = r.find(c.id) orelse continue;
             if (a.current == 0 or a.current > 100) continue;
-            s.percentage_used = .{ .value = 100 - a.current, .source = c.source, .confidence = c.conf, .note = c.note };
+            s.percentage_used = .{ .value = 100 - a.current, .source = c.source, .confidence = c.conf, .note = i18n.t(c.note) };
             break;
         }
     }
@@ -837,45 +838,45 @@ fn deriveAta(r: *const AtaSmart, opts: AtaOptions) HealthSummary {
         .value = @as(u128, a.raw48()) * 512,
         .source = "ATA SMART attr 241 raw48 x 512",
         .confidence = .low,
-        .note = "unit is vendor-specific (LBAs, 32 MiB, GiB)",
+        .note = i18n.t("unit is vendor-specific (LBAs, 32 MiB, GiB)"),
     };
     if (r.find(242)) |a| s.data_read_bytes = .{
         .value = @as(u128, a.raw48()) * 512,
         .source = "ATA SMART attr 242 raw48 x 512",
         .confidence = .low,
-        .note = "unit is vendor-specific (LBAs, 32 MiB, GiB)",
+        .note = i18n.t("unit is vendor-specific (LBAs, 32 MiB, GiB)"),
     };
 
     for (r.attrs[0..r.count]) |*a| {
         if (a.isFailing()) {
             s.status = .critical;
-            s.reason = "ATA SMART attribute at or below threshold (failing)";
+            s.reason = i18n.t("ATA SMART attribute at or below threshold (failing)");
             s.trigger_attr = a.id;
             return s;
         }
     }
     const counters = [_]struct { v: ?Derived(u64), id: u8, why: []const u8 }{
-        .{ .v = s.reallocated, .id = 5, .why = "ATA reallocated sectors > 0" },
-        .{ .v = s.pending, .id = 197, .why = "ATA pending sectors > 0" },
-        .{ .v = s.uncorrectable, .id = 198, .why = "ATA offline uncorrectable > 0" },
+        .{ .v = s.reallocated, .id = 5, .why = i18n.N("ATA reallocated sectors > 0") },
+        .{ .v = s.pending, .id = 197, .why = i18n.N("ATA pending sectors > 0") },
+        .{ .v = s.uncorrectable, .id = 198, .why = i18n.N("ATA offline uncorrectable > 0") },
     };
     for (counters) |c| {
         if (c.v) |d| if (d.value > 0) {
             s.status = .warning;
-            s.reason = c.why;
+            s.reason = i18n.t(c.why);
             s.trigger_attr = c.id;
             return s;
         };
     }
     if (r.count == 0) {
         s.status = .unknown;
-        s.reason = "ATA SMART page has no attributes";
+        s.reason = i18n.t("ATA SMART page has no attributes");
     } else {
         s.status = .ok;
         s.reason = if (r.thresholds_present)
-            "ATA no attribute at threshold; 5/197/198 = 0"
+            i18n.t("ATA no attribute at threshold; 5/197/198 = 0")
         else
-            "ATA 5/197/198 = 0 (thresholds unavailable)";
+            i18n.t("ATA 5/197/198 = 0 (thresholds unavailable)");
     }
     return s;
 }

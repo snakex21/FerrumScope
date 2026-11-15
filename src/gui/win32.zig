@@ -213,6 +213,7 @@ pub const WS_EX_CLIENTEDGE: u32 = 0x0000_0200;
 pub const CW_USEDEFAULT: i32 = @bitCast(@as(u32, 0x8000_0000));
 
 pub const SS_LEFT: u32 = 0x0000;
+pub const SS_RIGHT: u32 = 0x0002;
 pub const SS_NOPREFIX: u32 = 0x0080;
 pub const SS_ENDELLIPSIS: u32 = 0x4000;
 

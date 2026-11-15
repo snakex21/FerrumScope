@@ -1,0 +1,51 @@
+{
+  "@locale": "pl",
+  "linia {line} B, {n} zestawów": {
+    "one": "linia {line} B, {n} zestaw",
+    "few": "linia {line} B, {n} zestawy",
+    "many": "linia {line} B, {n} zestawów",
+    "other": "linia {line} B, {n} zestawu"
+  },
+  "surowy obraz CPUID ({n} liści, max_basic=0x{basic}, max_extended=0x{extended})": {
+    "one": "surowy obraz CPUID ({n} liść, max_basic=0x{basic}, max_extended=0x{extended})",
+    "few": "surowy obraz CPUID ({n} liście, max_basic=0x{basic}, max_extended=0x{extended})",
+    "many": "surowy obraz CPUID ({n} liści, max_basic=0x{basic}, max_extended=0x{extended})",
+    "other": "surowy obraz CPUID ({n} liścia, max_basic=0x{basic}, max_extended=0x{extended})"
+  },
+  "{n} dysków fizycznych": {
+    "one": "{n} dysk fizyczny",
+    "few": "{n} dyski fizyczne",
+    "many": "{n} dysków fizycznych",
+    "other": "{n} dysku fizycznego"
+  },
+  "{n} flagów": {
+    "one": "{n} flaga",
+    "few": "{n} flagi",
+    "many": "{n} flagów",
+    "other": "{n} flagi"
+  },
+  "{n} gniazda": {
+    "one": "{n} gniazdo",
+    "few": "{n} gniazda",
+    "many": "{n} gniazd",
+    "other": "{n} gniazda"
+  },
+  "{n} rozszerzeń": {
+    "one": "{n} rozszerzenie",
+    "few": "{n} rozszerzenia",
+    "many": "{n} rozszerzeń",
+    "other": "{n} rozszerzenia"
+  },
+  "{ways}-way, linia {line} B, {n} zestawów": {
+    "one": "{ways}-way, linia {line} B, {n} zestaw",
+    "few": "{ways}-way, linia {line} B, {n} zestawy",
+    "many": "{ways}-way, linia {line} B, {n} zestawów",
+    "other": "{ways}-way, linia {line} B, {n} zestawu"
+  },
+  "Źródło: {origin}. HWDB: {n} wpisów, rewizja {revision}.": {
+    "one": "Źródło: {origin}. HWDB: {n} wpis, rewizja {revision}.",
+    "few": "Źródło: {origin}. HWDB: {n} wpisy, rewizja {revision}.",
+    "many": "Źródło: {origin}. HWDB: {n} wpisów, rewizja {revision}.",
+    "other": "Źródło: {origin}. HWDB: {n} wpisu, rewizja {revision}."
+  }
+}

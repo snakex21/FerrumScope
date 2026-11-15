@@ -1,0 +1,21 @@
+# FerrumScope — kuratorowana tabela stron sterowników producentów.
+#
+# Wpisy dodaje człowiek (source = "manual"), po otwarciu strony w przeglądarce.
+# Gdy wpisu nie ma, program wyprowadza adres AMD z wykrytych danych
+# (src/sys/drivers.zig), a w ostateczności otwiera ogólną stronę sterowników.
+# Użytkownik może przypiąć własny adres (data\driver_links.toml) — ma pierwszeństwo.
+#
+# chipset: model = "<gniazdo>/<chipset>" (małe litery), np. "am4/b550"
+# gpu:     model = nazwa znormalizowana jak w lookup.normalizeGpu, np. "radeon rx 7900 xtx"
+
+[[chipset]]
+model = "am4/b550"
+url = "https://www.amd.com/en/support/downloads/drivers.html/chipsets/am4/b550.html"
+source = "manual"
+# ASRock B550 Taichi (sprzęt właściciela); GET 2026-11-15: HTTP 200.
+
+[[gpu]]
+model = "radeon rx 7900 xtx"
+url = "https://www.amd.com/en/support/downloads/drivers.html/graphics/radeon-rx/radeon-rx-7000-series/amd-radeon-rx-7900-xtx.html"
+source = "manual"
+# Radeon RX 7900 XTX (sprzęt właściciela); GET 2026-11-15: HTTP 200.

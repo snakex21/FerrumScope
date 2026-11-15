@@ -24,6 +24,10 @@ pub const arch = struct {
 
 pub const bus = struct {};
 
+/// Tłumaczenia interfejsu (katalogi `locales/*.json`, identyfikator = tekst polski).
+pub const i18n = @import("i18n/i18n.zig");
+pub const i18n_system = @import("i18n/system.zig");
+
 /// Ustawienia programu przenośnego (`data\settings.ini` obok programu).
 pub const settings = @import("settings.zig");
 

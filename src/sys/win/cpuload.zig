@@ -13,6 +13,7 @@
 //!   To NIE jest odczyt APERF/MPERF — ten wymaga sterownika (zakładka Czujniki).
 
 const std = @import("std");
+const i18n = @import("../../i18n/i18n.zig");
 
 const DWORD = u32;
 const LONG = i32;
@@ -151,7 +152,7 @@ pub const Sampler = struct {
                 }
                 if (sum_all > 0) out.total_load = @floatCast(100.0 * sum_busy / sum_all);
             }
-        } else out.load_error = "NtQuerySystemInformation(SystemProcessorPerformanceInformation) odrzuciło zapytanie";
+        } else out.load_error = i18n.t("NtQuerySystemInformation(SystemProcessorPerformanceInformation) odrzuciło zapytanie");
 
         // --- zegar ---------------------------------------------------------------
         var ppi: [max_cpus]PROCESSOR_POWER_INFORMATION = undefined;
