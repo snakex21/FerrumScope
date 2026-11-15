@@ -739,7 +739,8 @@ fn addBoardModel(b: *Builder, c: Ctx, g: snap.GpuAdapter, chip: ?[]const u8, boa
     };
     switch (r.origin) {
         .user => b.add(.{ .label = b.t("Model karty"), .value = value, .source = b.t("nazwa przypięta przez użytkownika (data\\gpu_models.toml)"), .confidence = .medium, .note = b.t("wpis użytkownika — niezweryfikowany przez program") }),
-        .curated => b.add(.{ .label = b.t("Model karty"), .value = value, .source = b.t("tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po podsystemie"), .confidence = .high }),
+        .curated => b.add(.{ .label = b.t("Model karty"), .value = value, .source = b.t("tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po podsystemie i numerze części VBIOS"), .confidence = .medium }),
+        .curated_subsys => b.add(.{ .label = b.t("Model karty"), .value = value, .source = b.t("tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po podsystemie"), .confidence = .low, .note = b.t("ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny") }),
         .pciids => b.add(.{ .label = b.t("Model karty"), .value = value, .source = b.fmt("{s} (subsystem)", .{pciSource(b, c)}), .confidence = .high }),
         .vbios => b.add(.{ .label = b.t("Model karty"), .value = value, .source = b.t("tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po numerze części VBIOS"), .confidence = .medium }),
     }

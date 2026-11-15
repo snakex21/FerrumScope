@@ -45,8 +45,12 @@ pub const Tables = struct {
 pub const Origin = enum {
     /// Przypięte przez użytkownika (`data\gpu_models.toml`).
     user,
-    /// Tabela kuratorowana, dopasowanie po podsystemie (i VBIOS, jeśli podany).
+    /// Tabela kuratorowana, dopasowanie po podsystemie I numerze części VBIOS
+    /// (najmocniejszy klucz — numer części wyróżnia wersję karty).
     curated,
+    /// Tabela kuratorowana, dopasowanie wyłącznie po podsystemie (ten sam
+    /// podsystem bywa używany przez kilka wersji karty — niższa pewność).
+    curated_subsys,
     /// Nazwa podsystemu z pci.ids (konkretniejsza niż nazwa układu).
     pciids,
     /// Tabela kuratorowana, dopasowanie wyłącznie po numerze części VBIOS.
@@ -80,7 +84,7 @@ fn vbiosMatch(prefix: []const u8, part: []const u8) bool {
     return prefix.len > 0 and part.len >= prefix.len and std.ascii.startsWithIgnoreCase(part, prefix);
 }
 
-const MatchKind = enum { none, subsys, vbios_only };
+const MatchKind = enum { none, both, subsys, vbios_only };
 
 fn match(e: Entry, in: Input) MatchKind {
     if (e.model.len == 0) return .none;
@@ -89,6 +93,7 @@ fn match(e: Entry, in: Input) MatchKind {
     if (!has_sub and !has_vb) return .none;
     if (has_sub and !subsysEql(e.subsys, in.sub_vendor, in.sub_device)) return .none;
     if (has_vb and !vbiosMatch(e.vbios_prefix, in.vbios_part)) return .none;
+    if (has_sub and has_vb) return .both;
     return if (has_sub) .subsys else .vbios_only;
 }
 
@@ -120,13 +125,19 @@ pub fn isSpecificBoardName(board: []const u8, chip_names: []const []const u8) bo
 pub fn resolve(t: Tables, in: Input) ?Resolved {
     for (t.user) |e| if (match(e, in) != .none) return .{ .model = e.model, .origin = .user };
     var vbios_hit: ?[]const u8 = null;
+    var subsys_hit: ?[]const u8 = null;
     for (t.curated) |e| switch (match(e, in)) {
-        .subsys => return .{ .model = e.model, .origin = .curated },
+        // Podsystem + VBIOS wygrywa niezależnie od kolejności wpisów.
+        .both => return .{ .model = e.model, .origin = .curated },
+        .subsys => if (subsys_hit == null) {
+            subsys_hit = e.model;
+        },
         .vbios_only => if (vbios_hit == null) {
             vbios_hit = e.model;
         },
         .none => {},
     };
+    if (subsys_hit) |m| return .{ .model = m, .origin = .curated_subsys };
     if (in.pciids_board) |b| if (isSpecificBoardName(b, in.chip_names)) return .{ .model = b, .origin = .pciids };
     if (vbios_hit) |m| return .{ .model = m, .origin = .vbios };
     return null;
@@ -241,7 +252,7 @@ test "gpu_boards: kolejność — użytkownik, kuratorowany, pci.ids, VBIOS" {
         .{ .subsys = "1849:5304", .model = "Model kuratorowany", .source = "manual" },
     };
     const r2 = resolve(.{ .curated = &cur }, in2).?;
-    try testing.expectEqual(Origin.curated, r2.origin);
+    try testing.expectEqual(Origin.curated_subsys, r2.origin);
     try testing.expectEqualStrings("Model kuratorowany", r2.model);
 
     const user = [_]Entry{.{ .subsys = "1849:5304", .model = "Moja karta", .source = "user" }};
@@ -288,4 +299,16 @@ test "gpu_boards: parser, zapis przypięcia i walidacja nazwy" {
     try testing.expect(cleanModelName("") == null);
     try testing.expect(cleanModelName("a\"b") == null);
     try testing.expect(cleanModelName("a\nb") == null);
+}
+
+test "gpu_boards: karta właściciela — VBIOS + podsystem wygrywa, sam podsystem ma niższą pewność" {
+    const cur = [_]Entry{
+        .{ .subsys = "1849:5304", .model = "ASRock Radeon RX 7900 XTX Phantom Gaming 24GB OC", .source = "user-confirmed (owner's card label)" },
+        .{ .subsys = "1849:5304", .vbios_prefix = "113-D70201-810009", .model = "ASRock Radeon RX 7900 XTX Phantom Gaming 24GB OC", .source = "user-confirmed (owner's card label)" },
+    };
+    const with_vbios = resolve(.{ .curated = &cur }, .{ .sub_vendor = 0x1849, .sub_device = 0x5304, .vbios_part = "113-D70201-810009" }).?;
+    try testing.expectEqual(Origin.curated, with_vbios.origin);
+    const sub_only = resolve(.{ .curated = &cur }, .{ .sub_vendor = 0x1849, .sub_device = 0x5304 }).?;
+    try testing.expectEqual(Origin.curated_subsys, sub_only.origin);
+    try testing.expectEqualStrings("ASRock Radeon RX 7900 XTX Phantom Gaming 24GB OC", sub_only.model);
 }

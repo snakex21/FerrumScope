@@ -855,5 +855,7 @@
   "Kliknij gniazdo, aby pokazać szczegóły modułu (to samo co lista „Gniazdo”).": "Click a slot to show the module details (same as the \"Slot\" list).",
   "Brak danych SMBIOS typ 17 — mapa gniazd niedostępna.": "No SMBIOS type 17 data — slot map unavailable.",
   "Kanał {channel}": "Channel {channel}",
-  "Tryb kanałów": "Channel mode"
+  "Tryb kanałów": "Channel mode",
+  "tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po podsystemie i numerze części VBIOS": "curated table (db/source/gpu_boards.toml), matched by subsystem and VBIOS part number",
+  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "other versions of the card may share this PCI subsystem — the VBIOS part number was not available"
 }

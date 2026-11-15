@@ -1334,9 +1334,10 @@ test "sysimg replay: grafika z DXGI + pci.ids (chip, karta, łącze)" {
     try std.testing.expectEqualStrings("AMD Radeon RX 7900 XTX", g.headline);
     try std.testing.expect(std.mem.startsWith(u8, fieldValue(g, "GPU: AMD Radeon RX 7900 XTX", "Układ GPU").?, "Navi 31"));
     try std.testing.expectEqualStrings("1849:5304", fieldValue(g, "GPU: AMD Radeon RX 7900 XTX", "Subsystem").?);
-    // pci.ids zna dla 1849:5304 tylko „Radeon RX 7900 XTX” (nazwa układu) — modelu nie zgadujemy.
+    // pci.ids zna dla 1849:5304 tylko „Radeon RX 7900 XTX”; model pochodzi z tabeli
+    // kuratorowanej (potwierdzenie właściciela), w replay bez VBIOS — z niską pewnością.
     try std.testing.expectEqualStrings("ASRock", fieldValue(g, "GPU: AMD Radeon RX 7900 XTX", "Producent karty").?);
-    try std.testing.expectEqualStrings("ASRock (model nieznany)", fieldValue(g, "GPU: AMD Radeon RX 7900 XTX", "Model karty").?);
+    try std.testing.expectEqualStrings("ASRock Radeon RX 7900 XTX Phantom Gaming 24GB OC", fieldValue(g, "GPU: AMD Radeon RX 7900 XTX", "Model karty").?);
     try std.testing.expect(std.mem.indexOf(u8, fieldValue(g, "GPU: AMD Radeon RX 7900 XTX", "Łącze PCIe").?, "x16") != null);
     // Replay nie ma bibliotek producenta: czujniki są „niedostępne” z powodem, nie zerem.
     try std.testing.expectEqualStrings("—", fieldValue(g, "Czujniki GPU: AMD Radeon RX 7900 XTX", "Temperatura GPU").?);
@@ -1391,7 +1392,8 @@ test "gpu_boards: wbudowana tabela kuratorowana parsuje się, a nazwa przypięta
     defer arena.deinit();
     const gb = ferrum.sys.gpu_boards;
     const curated = try gb.parse(arena.allocator(), @import("links_embedded").gpu_boards_text);
-    for (curated) |e| try std.testing.expectEqualStrings("manual", e.source);
+    // Wpisy dodaje człowiek: "manual" albo potwierdzenie właściciela sprzętu.
+    for (curated) |e| try std.testing.expect(std.mem.eql(u8, e.source, "manual") or std.mem.startsWith(u8, e.source, "user-confirmed"));
     const user = [_]gb.Entry{.{ .subsys = "1849:5304", .model = "ASRock Radeon RX 7900 XTX (test)", .source = "user" }};
     const r = gb.resolve(.{ .user = &user, .curated = curated }, .{ .sub_vendor = 0x1849, .sub_device = 0x5304, .pciids_board = "Radeon RX 7900 XTX" }).?;
     try std.testing.expectEqual(gb.Origin.user, r.origin);
@@ -1491,4 +1493,20 @@ comptime {
     _ = @import("update/update.zig");
     // Katalogi tłumaczeń: kompletność, parametry, liczba mnoga, literały poza katalogiem.
     _ = @import("i18n/catalog_test.zig");
+}
+
+test "sysimg replay: model karty właściciela z tabeli kuratorowanej (tylko podsystem, niska pewność)" {
+    const st = try replayState();
+    defer st.destroy();
+    const g = findPage(st.buildPages(), "graphics");
+    var found = false;
+    for (g.sections.items) |sec| for (sec.fields.items) |f| {
+        if (std.mem.eql(u8, f.label, "Model karty")) {
+            try std.testing.expectEqualStrings("ASRock Radeon RX 7900 XTX Phantom Gaming 24GB OC", f.value);
+            try std.testing.expect(std.mem.indexOf(u8, f.source, "tabela kuratorowana") != null);
+            try std.testing.expectEqual(sys_report.Confidence.low, f.confidence);
+            found = true;
+        }
+    };
+    try std.testing.expect(found);
 }

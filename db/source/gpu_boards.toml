@@ -22,7 +22,21 @@
 # model = "Producent Model"
 # source = "manual"
 #
-# Karta 1849:5304 (ASRock, Navi 31 / Radeon RX 7900 XTX) z maszyny
-# referencyjnej projektu: pci.ids podaje dla podsystemu tylko „Radeon RX 7900
-# XTX”, a numer części VBIOS nie zawiera nazwy wersji karty — wpisu brak
-# (model pokazywany jako „ASRock (model nieznany)”, do przypięcia w GUI).
+# Karta właściciela projektu: ASRock Radeon RX 7900 XTX Phantom Gaming 24GB OC
+# (model potwierdzony przez właściciela z naklejki karty). Wykrycie: podsystem
+# 1849:5304 na 1002:744C; ADL strPartNumber = 113-D70201-810009.
+# UWAGA: ten sam podsystem 1849:5304 mogą mieć inne karty ASRock 7900 XTX
+# (np. wersje bez OC albo Taichi), dlatego mocniejszym kluczem jest numer części
+# VBIOS: wpis z `vbios_prefix` daje pewność średnią, a dopasowanie wyłącznie po
+# podsystemie (np. w replay bez danych ADL) — niską.
+
+[[board]]
+subsys = "1849:5304"
+vbios_prefix = "113-D70201-810009"
+model = "ASRock Radeon RX 7900 XTX Phantom Gaming 24GB OC"
+source = "user-confirmed (owner's card label)"
+
+[[board]]
+subsys = "1849:5304"
+model = "ASRock Radeon RX 7900 XTX Phantom Gaming 24GB OC"
+source = "user-confirmed (owner's card label)"
