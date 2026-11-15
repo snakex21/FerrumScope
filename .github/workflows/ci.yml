@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Przypięty Zig 0.15.2 — tools/fetch_zig.py weryfikuje SHA-256 archiwum
+      # i odmawia rozpakowania przy niezgodności.
+      - name: Fetch pinned Zig (SHA-256 verified)
+        run: python tools/fetch_zig.py
+
+      - name: zig fmt --check
+        run: tools/zig/zig-x86_64-windows-0.15.2/zig.exe fmt --check src tools/hwdb_compile.zig tools/pciids_compile.zig tools/uia_select_tab.zig build.zig build.zig.zon
+
+      - name: zig build test
+        run: tools/zig/zig-x86_64-windows-0.15.2/zig.exe build test --summary all
+
+      - name: ReleaseSafe build
+        run: tools/zig/zig-x86_64-windows-0.15.2/zig.exe build -Doptimize=ReleaseSafe
+
+      - name: Report from replay fixture (smoke test)
+        shell: pwsh
+        run: |
+          ./zig-out/bin/ferrumscope.exe report --format=json -o replay.json `
+            --sys-replay db/fixtures/sys/asrock_b550_5800x3d_rx7900xtx.sysimg `
+            --cpu-replay db/fixtures/amd_ryzen7_5800x3d_native.cpuimg
+          Get-Content replay.json -Raw | ConvertFrom-Json | Out-Null
