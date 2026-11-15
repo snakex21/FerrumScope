@@ -1,0 +1,16 @@
+# Pliki tekstowe zawsze z LF w katalogu roboczym — także na runnerach Windows
+# (core.autocrlf=true), bo `zig fmt --check` traktuje CRLF jako błąd formatu,
+# a parsery fikstur/katalogów oczekują LF.
+* text=auto eol=lf
+
+# Skrypty Windows zostają bajt w bajt tak, jak są w repozytorium.
+*.bat -text
+*.ps1 -text
+
+# Binaria.
+*.png binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.sys binary
+*.pdb binary
