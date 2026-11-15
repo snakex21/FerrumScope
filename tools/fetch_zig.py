@@ -69,6 +69,12 @@ def zig_exe() -> str | None:
 
 
 def main() -> int:
+    # Konsola Windows (cp1252 na runnerach CI) nie zna polskich znaków komunikatów.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--check", action="store_true",
                     help="sprawdź, czy przypięty Zig jest obecny")

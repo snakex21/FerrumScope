@@ -25,6 +25,9 @@ on:
         description: 'Istniejący tag wydania, np. v0.2.0'
         required: true
 
+env:
+  PYTHONIOENCODING: utf-8
+
 permissions:
   contents: read
 
