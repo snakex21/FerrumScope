@@ -1486,6 +1486,7 @@ comptime {
     _ = @import("gui/forms.zig");
     _ = @import("gui/badge.zig");
     _ = @import("gui/image.zig");
+    _ = @import("gui/vendor_badge.zig");
     // Aktualizator: wersje, manifest, SHA256SUMS, podmiana z wycofaniem (bez sieci).
     _ = @import("update/update.zig");
     // Katalogi tłumaczeń: kompletność, parametry, liczba mnoga, literały poza katalogiem.

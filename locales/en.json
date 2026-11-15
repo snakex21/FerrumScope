@@ -851,5 +851,9 @@
   "FerrumScope — przypnij nazwę modelu": "FerrumScope — pin model name",
   "Skopiuj do schowka nazwę modelu tej karty (np. z naklejki, pudełka albo strony producenta; 1–96 znaków, bez cudzysłowu) i kliknij „Przypnij nazwę modelu…” ponownie.\n\nPodsystem: {subsys}": "Copy this card's model name to the clipboard (e.g. from the label, the box or the manufacturer's page; 1–96 characters, no quotes) and click \"Pin model name…\" again.\n\nSubsystem: {subsys}",
   "Przypiąć nazwę „{model}” dla karty o podsystemie {subsys}?\n\nZapis: data\\gpu_models.toml obok programu (ma pierwszeństwo przed tabelą kuratorowaną i pci.ids).": "Pin the name \"{model}\" for the card with subsystem {subsys}?\n\nSaved to: data\\gpu_models.toml next to the program (takes precedence over the curated table and pci.ids).",
-  "Nie udało się zapisać data\\gpu_models.toml.": "Could not save data\\gpu_models.toml."
+  "Nie udało się zapisać data\\gpu_models.toml.": "Could not save data\\gpu_models.toml.",
+  "Kliknij gniazdo, aby pokazać szczegóły modułu (to samo co lista „Gniazdo”).": "Click a slot to show the module details (same as the \"Slot\" list).",
+  "Brak danych SMBIOS typ 17 — mapa gniazd niedostępna.": "No SMBIOS type 17 data — slot map unavailable.",
+  "Kanał {channel}": "Channel {channel}",
+  "Tryb kanałów": "Channel mode"
 }

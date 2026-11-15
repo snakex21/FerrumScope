@@ -115,6 +115,11 @@ const App = struct {
     /// Wybór języka (zakładka „O programie”, prawy górny róg w wierszu tytułu).
     lang_label: ?w.HWND = null,
     lang_combo: ?w.HWND = null,
+    /// Graficzna mapa gniazd pamięci (zakładka Pamięć).
+    slot_map: ?w.HWND = null,
+    /// Podpis ostatnio narysowanej mapy (wybór + obsadzenie) — przemalowanie
+    /// tylko po zmianie.
+    slot_map_sig: u64 = std.math.maxInt(u64),
     font: ?w.HFONT = null,
     font_title: ?w.HFONT = null,
     row_imgs: ?w.HIMAGELIST = null,
@@ -536,15 +541,27 @@ fn layoutForm(t: usize, area: w.RECT) void {
     var ci: usize = 0;
     while (ci < app.n_cells and app.cells[ci].tab != t) ci += 1;
 
-    const has_badge = forms.tabs[t].badge != null;
-    for (forms.tabs[t].bands, 0..) |band, band_i| {
-        // Pierwszy pas zakładki z plakietką zostawia miejsce na logo po prawej.
-        const width = if (has_badge and band_i == 0) full_width - px(badge_w) - px(M.gap) else full_width;
-        if (has_badge and band_i == 0) {
-            for (&badges) |*bv| {
-                if (bv.hwnd != null and bv.tab == t) move(bv.hwnd, x0 + full_width - px(badge_w), y + px(6), px(badge_w), px(badge_h));
-            }
+    // Mapa gniazd pamięci: pas na całą szerokość przed grupami.
+    if (forms.tabs[t].slot_map) {
+        const mh = slotMapHeight();
+        move(app.slot_map, x0, y, full_width, mh);
+        y += mh + px(M.gap);
+    }
+    // Kolumna plakietek po prawej, od góry pierwszego pasa grup. Każdy pas,
+    // który zaczyna się obok kolumny, zostawia na nią miejsce.
+    var badge_bottom = y;
+    {
+        var by = y + px(6);
+        for (&badges) |*bv| {
+            if (bv.hwnd == null or bv.tab != t) continue;
+            const bh = badgeHeight(bv.kind);
+            move(bv.hwnd, x0 + full_width - px(badge_w), by, px(badge_w), bh);
+            badge_bottom = by + bh;
+            by += bh + px(4);
         }
+    }
+    for (forms.tabs[t].bands) |band| {
+        const width = if (y < badge_bottom) full_width - px(badge_w) - px(M.gap) else full_width;
         var total_w: i32 = 0;
         for (band) |g| total_w += g.weight;
         var band_h: i32 = 0;
@@ -902,6 +919,7 @@ fn updateVisibility() void {
     for (app.groups[0..app.n_groups]) |g| show(g.hwnd, !list and g.tab == t);
     for (app.extras[0..app.n_extras]) |e| show(e.hwnd, e.tab == t);
     for (badges) |bv| show(bv.hwnd, !list and bv.tab == t);
+    show(app.slot_map, !list and forms.tabs[t].slot_map);
     for (0..n_tabs) |i| {
         show(app.sel_label[i], i == t);
         show(app.sel_combo[i], i == t);
@@ -918,6 +936,7 @@ fn refreshCurrent(full: bool) void {
     } else if (forms.tabs[t].kind == .form) {
         fillForm(t);
         updateBadge(t);
+        if (forms.tabs[t].slot_map) updateSlotMap();
     }
     const p = pageOfTab(t);
     setText(app.ttl, if (p) |pp| (if (pp.headline.len > 0) pp.headline else pp.title) else i18n.t(forms.tabs[t].title));
@@ -1122,6 +1141,10 @@ fn wndProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.win
                     di.lpszText = badgeTip(bv);
                     return 0;
                 }
+                if (app.slot_map != null and hdr.idFrom == @intFromPtr(app.slot_map.?)) {
+                    di.lpszText = widen(&tip_buf, i18n.t("Kliknij gniazdo, aby pokazać szczegóły modułu (to samo co lista „Gniazdo”)."));
+                    return 0;
+                }
                 if (cellByHwnd(hdr.idFrom)) |c| {
                     if (fieldOfCell(c)) |f| di.lpszText = tipText(f.*) else di.lpszText = widen(&tip_buf, i18n.t("Brak tego pola w danych tej maszyny."));
                 }
@@ -1140,6 +1163,7 @@ fn wndProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.win
                     const t = id - ID_SELECTOR0;
                     const s = w.SendMessageW(app.sel_combo[t].?, w.CB_GETCURSEL, 0, 0);
                     if (s >= 0) app.sel_index[t] = @intCast(s);
+                    // Lista „Gniazdo” i mapa gniazd pokazują ten sam wybór.
                     refreshCurrent(true);
                 }
                 return 0;
@@ -1390,6 +1414,7 @@ pub fn wWinMain(inst: w.HINSTANCE, _: ?w.HINSTANCE, cmd_ptr: [*:0]u16, show_cmd:
 
     createForms();
     createBadges(inst);
+    createSlotMap(inst);
     create_parent = null;
     const bstyle = w.WS_CHILD | w.WS_VISIBLE | w.WS_TABSTOP;
     app.btn_refresh = createText(L("BUTTON"), i18n.t("Odśwież (F5)"), 0, bstyle | w.BS_PUSHBUTTON, ID_REFRESH);
@@ -1453,11 +1478,19 @@ pub fn wWinMain(inst: w.HINSTANCE, _: ?w.HINSTANCE, cmd_ptr: [*:0]u16, show_cmd:
 
 const badge = @import("gui/badge.zig");
 const image = @import("gui/image.zig");
+const vendors = @import("gui/vendors.zig");
+const vendor_badge = @import("gui/vendor_badge.zig");
 const logos = @import("logos_embedded");
 
 const badge_class = L("FerrumScopeBadge");
 const badge_w: i32 = 150;
 const badge_h: i32 = 118;
+/// Wysokość małej plakietki (producent karty, chipset).
+const badge_small_h: i32 = 44;
+
+fn badgeHeight(k: forms.BadgeKind) i32 {
+    return px(if (k.small()) badge_small_h else badge_h);
+}
 
 const BadgeView = struct {
     hwnd: ?w.HWND = null,
@@ -1470,8 +1503,14 @@ const BadgeView = struct {
     /// Skąd pochodzi obraz (do podpowiedzi).
     src_buf: [640]u8 = undefined,
     src_len: usize = 0,
+    /// Plakietki producentów: klucz (`vendors.zig`), nazwa i model — kopie,
+    /// bo strony raportu są przebudowywane co sekundę.
+    vkey_buf: [32]u8 = undefined,
+    vkey_len: usize = 0,
+    name_buf: [96]u8 = undefined,
+    model_buf: [96]u8 = undefined,
 };
-var badges: [2]BadgeView = .{ .{}, .{} };
+var badges: [8]BadgeView = @splat(.{});
 
 const BLENDFUNCTION = extern struct { op: u8 = 0, flags: u8 = 0, alpha: u8 = 255, format: u8 = 1 };
 const PAINTSTRUCT = extern struct { hdc: ?*anyopaque, fErase: w.BOOL, rcPaint: w.RECT, fRestore: w.BOOL, fIncUpdate: w.BOOL, rgbReserved: [32]u8 };
@@ -1531,7 +1570,11 @@ fn loadBadgeImage(bv: *BadgeView) void {
     if (bv.img) |*i| i.deinit();
     bv.img = null;
     const bw: u32 = @intCast(px(badge_w) - px(16));
-    const bh: u32 = @intCast(@divTrunc(px(badge_h) * 62, 100));
+    const bh: u32 = @intCast(if (bv.kind.small()) badgeHeight(bv.kind) - px(10) else @divTrunc(px(badge_h) * 62, 100));
+    if (vendor_badge.category(bv.kind)) |cat| {
+        loadVendorImage(bv, cat, bw, bh);
+        return;
+    }
     // 1. data\images\ (pierwszeństwo).
     var dir_buf: [1024]u8 = undefined;
     if (imagesDir(&dir_buf)) |dir| {
@@ -1573,10 +1616,108 @@ fn loadBadgeImage(bv: *BadgeView) void {
     setSrc(bv, i18n.t("Plakietka rysowana przez FerrumScope (brak logo dla tej serii/producenta)"));
 }
 
+/// Obraz plakietki producenta: `data\images\<kategoria>\…` → logo dołączone →
+/// rysowana plakietka (`vendors.logoChain`).
+fn loadVendorImage(bv: *BadgeView, cat: vendors.Category, bw: u32, bh: u32) void {
+    const key: ?[]const u8 = if (bv.vkey_len > 0) bv.vkey_buf[0..bv.vkey_len] else null;
+    var cb: vendors.ChainBuf = .{};
+    const ch = vendors.logoChain(cat, key, bv.text.badge.model, &cb);
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const ba = arena.allocator();
+    var dir_buf: [1024]u8 = undefined;
+    if (imagesDir(&dir_buf)) |dir| {
+        for (ch.images) |rel| {
+            var pb: [1200]u8 = undefined;
+            const full = std.fmt.bufPrint(&pb, "{s}{s}", .{ dir, rel }) catch continue;
+            std.fs.accessAbsolute(full, .{}) catch continue;
+            var wb: [1200]u16 = undefined;
+            if (image.loadFile(widen(&wb, full), bw, bh)) |img| {
+                bv.img = img;
+                setSrc(bv, i18n.tf(ba, "Obraz użytkownika: data\\images\\{file}", .{ .file = rel }));
+                return;
+            }
+        }
+    }
+    for (ch.logos) |k| {
+        for (logos.all) |l| {
+            if (!std.mem.eql(u8, l.name, k)) continue;
+            if (image.loadMemory(l.bytes, bw, bh)) |img| {
+                bv.img = img;
+                setSrc(bv, i18n.tf(ba, "Logo: assets/logos/{name}.png (Wikimedia Commons, public domain; znak towarowy właściciela, użyty do identyfikacji)", .{ .name = k }));
+                return;
+            }
+        }
+    }
+    setSrc(bv, i18n.t("Plakietka rysowana przez FerrumScope (brak logo dla tej serii/producenta)"));
+}
+
+/// Producent dla plakietki z pól strony (ten sam model co okno).
+fn vendorInfo(kind: forms.BadgeKind, p: *const report.Page, idx: usize) vendor_badge.Info {
+    const val = struct {
+        fn f(pg: *const report.Page, c: forms.Cell, i: usize) []const u8 {
+            const fld = forms.resolve(pg, c, i) orelse return "";
+            return if (fld.state.isValue()) fld.value else "";
+        }
+    }.f;
+    switch (kind) {
+        .board => return vendor_badge.board(
+            val(p, .{ .label = "", .sect = "Płyta główna", .field = "Producent" }, 0),
+            val(p, .{ .label = "", .sect = "Płyta główna", .field = "Model" }, 0),
+        ),
+        .chipset => {
+            const f = forms.resolve(p, .{ .label = "", .sect = "Chipset", .field = "Chipset" }, 0) orelse return .{};
+            return vendor_badge.chipset(f.raw, f.value);
+        },
+        .memory => {
+            if (idx >= p.slots.len) return .{};
+            const sl = p.slots[idx];
+            if (!sl.occupied) return .{ .name = i18n.t("pusty") };
+            return vendor_badge.memory(sl.vendor_key, if (sl.vendor.len > 0) sl.vendor else sl.manufacturer, val(p, .{ .label = "", .sect = "@Gniazdo {slot}", .field = "Part number" }, idx));
+        },
+        .storage => return vendor_badge.storage(val(p, .{ .label = "", .sect = "@Dysk {index}: {model}", .field = "Model" }, idx)),
+        .gpu_partner => {
+            const id = badgeField(p, "@GPU: {name}", "Identyfikator", idx);
+            const vid: u16 = if (id.len == 9) std.fmt.parseInt(u16, id[0..4], 16) catch 0 else 0;
+            return vendor_badge.gpuPartner(vid, badgeField(p, "@GPU: {name}", "Subsystem", idx));
+        },
+        .cpu, .gpu => return .{},
+    }
+}
+
+fn copyInto(dst: []u8, s: []const u8) []const u8 {
+    var n = @min(s.len, dst.len);
+    while (n > 0 and n < s.len and (s[n] & 0xC0) == 0x80) n -= 1;
+    @memcpy(dst[0..n], s[0..n]);
+    return dst[0..n];
+}
+
+fn updateVendorBadge(bv: *BadgeView, p: *const report.Page, idx: usize) void {
+    const info = vendorInfo(bv.kind, p, idx);
+    var kb: [256]u8 = undefined;
+    const sig = std.fmt.bufPrint(&kb, "{s}|{s}|{s}|{d}", .{ info.key orelse "", info.name, info.model, app.dpi }) catch "";
+    if (std.mem.eql(u8, sig, bv.key_buf[0..bv.key_len])) return;
+    @memcpy(bv.key_buf[0..sig.len], sig);
+    bv.key_len = sig.len;
+    const k = copyInto(&bv.vkey_buf, info.key orelse "");
+    bv.vkey_len = k.len;
+    bv.text = .{};
+    bv.text.badge = .{
+        .series = copyInto(&bv.name_buf, if (info.name.len > 0) info.name else "—"),
+        .model = if (bv.kind.small()) "" else copyInto(&bv.model_buf, info.model),
+    };
+    loadBadgeImage(bv);
+    _ = w.InvalidateRect(bv.hwnd, null, 1);
+}
+
 fn updateBadge(t: usize) void {
     for (&badges) |*bv| {
         if (bv.hwnd == null or bv.tab != t) continue;
         const p = pageOfTab(t) orelse continue;
+        if (vendor_badge.category(bv.kind) != null) {
+            updateVendorBadge(bv, p, app.sel_index[t]);
+            continue;
+        }
         var nt: badge.Text = .{};
         if (bv.kind == .cpu) {
             badge.fromCpu(&nt, badgeField(p, "Procesor", "Producent", 0), badgeField(p, "Procesor", "Brand string", 0));
@@ -1651,6 +1792,10 @@ fn paintBadge(hwnd: w.HWND, bv: *BadgeView) void {
     const b = bv.text.badge;
     const col = b.scheme.colors();
     const rad = px(14);
+    if (bv.kind.small() or vendor_badge.category(bv.kind) != null) {
+        paintVendorBadge(hdc, rc, bv);
+        return;
+    }
     if (bv.img) |img| {
         // Logo na jasnym kafelku z cienką ramką, model pod spodem.
         const pen = CreatePen(0, 1, 0x00D0D0D0);
@@ -1693,8 +1838,43 @@ fn paintBadge(hwnd: w.HWND, bv: *BadgeView) void {
     drawText(hdc, b.model, &r3, badge_font_small, col.text);
 }
 
+/// Plakietka producenta: logo (albo nazwa na jasnym kafelku), pod spodem
+/// model — mała plakietka bez modelu.
+fn paintVendorBadge(hdc: ?*anyopaque, rc: w.RECT, bv: *const BadgeView) void {
+    const b = bv.text.badge;
+    const rad = px(10);
+    const pen = CreatePen(0, 1, 0x00D0D0D0);
+    const br = w.CreateSolidBrush(0x00FFFFFF);
+    const op = SelectObject(hdc, pen);
+    const ob = SelectObject(hdc, br);
+    _ = RoundRect(hdc, 0, 0, rc.right, rc.bottom, rad, rad);
+    _ = SelectObject(hdc, op);
+    _ = SelectObject(hdc, ob);
+    _ = image.DeleteObject(pen);
+    _ = w.DeleteObject(br);
+    const small = bv.kind.small();
+    const area_h = if (small or b.model.len == 0) rc.bottom else @divTrunc(rc.bottom * 72, 100);
+    if (bv.img) |img| {
+        const x = @divTrunc(rc.right - @as(i32, @intCast(img.w)), 2);
+        const y = @divTrunc(area_h - @as(i32, @intCast(img.h)), 2);
+        const mdc = CreateCompatibleDC(hdc);
+        const old = SelectObject(mdc, img.bmp);
+        _ = AlphaBlend(hdc, x, y, @intCast(img.w), @intCast(img.h), mdc, 0, 0, @intCast(img.w), @intCast(img.h), .{});
+        _ = SelectObject(mdc, old);
+        _ = DeleteDC(mdc);
+    } else {
+        var tr: w.RECT = .{ .left = px(6), .top = 0, .right = rc.right - px(6), .bottom = area_h };
+        drawText(hdc, b.series, &tr, badge_font_big, 0x00404040);
+    }
+    if (!small and b.model.len > 0) {
+        var mr: w.RECT = .{ .left = px(4), .top = area_h, .right = rc.right - px(4), .bottom = rc.bottom - px(4) };
+        drawText(hdc, b.model, &mr, badge_font_small, 0x00505050);
+    }
+}
+
 fn badgeLink(bv: *const BadgeView) ?*const report.Link {
     const p = pageOfTab(bv.tab) orelse return null;
+    if (vendor_badge.category(bv.kind) != null) return null;
     if (bv.kind == .cpu) return forms.findLink(p, "cpu_search", "");
     const scope = forms.instanceName(p, "GPU: {name}", app.sel_index[bv.tab]) orelse "";
     return forms.findLink(p, "gpu_search", scope);
@@ -1717,7 +1897,9 @@ fn badgeProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.w
             return 0;
         },
         WM_SETCURSOR => {
-            _ = SetCursor(w.LoadCursorW(null, @ptrFromInt(32649))); // IDC_HAND
+            // Dłoń tylko nad plakietką z odnośnikiem (CPU/GPU).
+            const link = if (bv) |b| badgeLink(b) != null else false;
+            _ = SetCursor(w.LoadCursorW(null, @ptrFromInt(@as(usize, if (link) 32649 else 32512)))); // IDC_HAND / IDC_ARROW
             return 1;
         },
         else => {},
@@ -1730,16 +1912,18 @@ fn createBadges(inst: w.HINSTANCE) void {
     _ = w.RegisterClassExW(&bc);
     var n: usize = 0;
     for (forms.tabs, 0..) |t, ti| {
-        const k = t.badge orelse continue;
-        if (n >= badges.len) break;
-        badges[n] = .{ .tab = ti, .kind = k };
-        badges[n].hwnd = w.CreateWindowExW(0, badge_class, null, w.WS_CHILD, 0, 0, 10, 10, app.tab_panels[ti] orelse app.panel, null, inst, null);
-        addTip(badges[n].hwnd);
-        n += 1;
+        for (t.badges) |k| {
+            if (n >= badges.len) break;
+            badges[n] = .{ .tab = ti, .kind = k };
+            badges[n].hwnd = w.CreateWindowExW(0, badge_class, null, w.WS_CHILD, 0, 0, 10, 10, app.tab_panels[ti] orelse app.panel, null, inst, null);
+            addTip(badges[n].hwnd);
+            n += 1;
+        }
     }
 }
 
 fn badgeTip(bv: *const BadgeView) [*:0]const u16 {
+    if (badgeLink(bv) == null) return widen(&tip_buf, bv.src_buf[0..bv.src_len]);
     var b: [1024]u8 = undefined;
     const s = std.fmt.bufPrint(&b, "{s}\n{s}", .{ bv.src_buf[0..bv.src_len], i18n.t("Kliknij: wyszukaj w bazie TechPowerUp (otwiera przeglądarkę).") }) catch bv.src_buf[0..bv.src_len];
     return widen(&tip_buf, s);
@@ -1840,4 +2024,242 @@ fn pinModelFromClipboard(c: *const CellCtl) void {
         return;
     };
     refreshCurrent(true);
+}
+
+// ---------------------------------------------------------------------------
+// Mapa gniazd pamięci (zakładka Pamięć): kafelek na gniazdo, grupy wg kanału
+// ---------------------------------------------------------------------------
+
+const slotmap_class = L("FerrumScopeSlotMap");
+const ix_memory = forms.tabIndex("memory").?;
+const max_tiles = 32;
+
+extern "gdi32" fn CreateCompatibleBitmap(?*anyopaque, i32, i32) callconv(.winapi) ?*anyopaque;
+extern "gdi32" fn BitBlt(?*anyopaque, i32, i32, i32, i32, ?*anyopaque, i32, i32, u32) callconv(.winapi) w.BOOL;
+extern "gdi32" fn MoveToEx(?*anyopaque, i32, i32, ?*anyopaque) callconv(.winapi) w.BOOL;
+
+const SM = struct {
+    const caption_h: i32 = 18;
+    const tile_h: i32 = 56;
+    const tile_w: i32 = 118;
+    const gap: i32 = 6;
+    const group_gap: i32 = 18;
+};
+
+fn slotMapHeight() i32 {
+    return px(SM.caption_h) + px(SM.tile_h) + px(4);
+}
+
+const Tile = struct { rect: w.RECT, slot: usize };
+const Caption = struct { rect: w.RECT, channel: []const u8 };
+
+const Geometry = struct {
+    tiles: [max_tiles]Tile = undefined,
+    n_tiles: usize = 0,
+    caps: [max_tiles]Caption = undefined,
+    n_caps: usize = 0,
+};
+
+/// Rozmieszczenie kafelków: grupy kanałów w kolejności pierwszego wystąpienia,
+/// w grupie — kolejność gniazd ze strony (= kolejność struktur SMBIOS).
+fn slotGeometry(slots: []const report.MemSlot, width: i32) Geometry {
+    var g: Geometry = .{};
+    const n = @min(slots.len, max_tiles);
+    if (n == 0) return g;
+    var chans: [max_tiles][]const u8 = undefined;
+    var n_ch: usize = 0;
+    for (slots[0..n]) |sl| {
+        var seen = false;
+        for (chans[0..n_ch]) |c| {
+            if (std.mem.eql(u8, c, sl.channel)) seen = true;
+        }
+        if (!seen) {
+            chans[n_ch] = sl.channel;
+            n_ch += 1;
+        }
+    }
+    const ni: i32 = @intCast(n);
+    const ng: i32 = @intCast(n_ch);
+    const spare = width - (ni - ng) * px(SM.gap) - (ng - 1) * px(SM.group_gap);
+    const tw = @max(px(48), @min(px(SM.tile_w), @divTrunc(spare, ni)));
+    var x: i32 = 0;
+    const top = px(SM.caption_h);
+    for (chans[0..n_ch], 0..) |ch, gi| {
+        if (gi > 0) x += px(SM.group_gap) - px(SM.gap);
+        const gx = x;
+        for (slots[0..n], 0..) |sl, i| {
+            if (!std.mem.eql(u8, sl.channel, ch)) continue;
+            g.tiles[g.n_tiles] = .{ .rect = .{ .left = x, .top = top, .right = x + tw, .bottom = top + px(SM.tile_h) }, .slot = i };
+            g.n_tiles += 1;
+            x += tw + px(SM.gap);
+        }
+        if (ch.len > 0) {
+            g.caps[g.n_caps] = .{ .rect = .{ .left = gx, .top = 0, .right = x - px(SM.gap), .bottom = top - px(2) }, .channel = ch };
+            g.n_caps += 1;
+        }
+    }
+    return g;
+}
+
+fn memoryPage() ?*const report.Page {
+    return pageOfTab(ix_memory);
+}
+
+/// Przemalowuje mapę, gdy zmienił się wybór albo obsadzenie gniazd.
+fn updateSlotMap() void {
+    const p = memoryPage() orelse return;
+    var sig: u64 = app.sel_index[ix_memory] | (@as(u64, p.slots.len) << 8);
+    for (p.slots, 0..) |sl, i| {
+        if (sl.occupied and i < 48) sig |= @as(u64, 1) << @intCast(16 + i);
+    }
+    if (sig == app.slot_map_sig) return;
+    app.slot_map_sig = sig;
+    _ = w.InvalidateRect(app.slot_map, null, 0);
+}
+
+fn slotSizeText(buf: []u8, n: u64) []const u8 {
+    const gib = n / (1024 * 1024 * 1024);
+    if (gib > 0) return std.fmt.bufPrint(buf, "{d} GB", .{gib}) catch "";
+    return std.fmt.bufPrint(buf, "{d} MB", .{n / (1024 * 1024)}) catch "";
+}
+
+fn drawLeft(hdc: ?*anyopaque, s: []const u8, r: *w.RECT, font: ?w.HFONT, color: u32) void {
+    var wb: [128]u16 = undefined;
+    const p = widen(&wb, s);
+    _ = SelectObject(hdc, font);
+    _ = w.SetTextColor(hdc, color);
+    _ = DrawTextW(hdc, p, @intCast(std.mem.len(p)), r, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX | DT_VCENTER);
+}
+
+fn paintSlotMap(hwnd: w.HWND) void {
+    var ps: PAINTSTRUCT = undefined;
+    const hdc_win = BeginPaint(hwnd, &ps);
+    defer _ = EndPaint(hwnd, &ps);
+    badgeFonts();
+    var rc: w.RECT = undefined;
+    _ = w.GetClientRect(hwnd, &rc);
+    // Podwójne buforowanie — mapa odświeża się razem ze stroną.
+    const hdc = CreateCompatibleDC(hdc_win);
+    const bmp = CreateCompatibleBitmap(hdc_win, rc.right, rc.bottom);
+    const old_bmp = SelectObject(hdc, bmp);
+    defer {
+        _ = BitBlt(hdc_win, 0, 0, rc.right, rc.bottom, hdc, 0, 0, 0x00CC0020); // SRCCOPY
+        _ = SelectObject(hdc, old_bmp);
+        _ = w.DeleteObject(bmp);
+        _ = DeleteDC(hdc);
+    }
+    _ = FillRect(hdc, &rc, w.GetSysColorBrush(w.COLOR_WINDOW));
+    _ = SetBkMode(hdc, 1);
+    const p = memoryPage() orelse return;
+    if (p.slots.len == 0) {
+        var r = rc;
+        drawLeft(hdc, i18n.t("Brak danych SMBIOS typ 17 — mapa gniazd niedostępna."), &r, app.font, toneColor(.muted));
+        return;
+    }
+    const g = slotGeometry(p.slots, rc.right);
+    var arena_buf: [512]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+    for (g.caps[0..g.n_caps]) |c| {
+        fba.reset();
+        var r = c.rect;
+        drawLeft(hdc, i18n.tf(fba.allocator(), "Kanał {channel}", .{ .channel = c.channel }), &r, badge_font_small, toneColor(.muted));
+    }
+    const sel = app.sel_index[ix_memory];
+    for (g.tiles[0..g.n_tiles]) |t| {
+        const sl = p.slots[t.slot];
+        const selected = t.slot == sel;
+        const bg: u32 = if (sl.occupied) 0x00F7EFE6 else 0x00F2F2F2;
+        const border: u32 = if (selected) 0x00D77800 else if (sl.occupied) 0x00B0905A else 0x00C8C8C8;
+        const pen = CreatePen(0, if (selected) px(3) else 1, border);
+        const br = w.CreateSolidBrush(bg);
+        const op = SelectObject(hdc, pen);
+        const ob = SelectObject(hdc, br);
+        _ = RoundRect(hdc, t.rect.left + 1, t.rect.top + 1, t.rect.right - 1, t.rect.bottom - 1, px(8), px(8));
+        _ = SelectObject(hdc, op);
+        _ = SelectObject(hdc, ob);
+        _ = image.DeleteObject(pen);
+        _ = w.DeleteObject(br);
+        const fg: u32 = if (sl.occupied) 0x00303030 else 0x00909090;
+        const lh = @divTrunc(t.rect.bottom - t.rect.top - px(6), 3);
+        var nb: [64]u8 = undefined;
+        // Wiersz 1: etykieta i numer gniazda.
+        var r1: w.RECT = .{ .left = t.rect.left + px(7), .top = t.rect.top + px(3), .right = t.rect.right - px(5), .bottom = t.rect.top + px(3) + lh };
+        drawLeft(hdc, std.fmt.bufPrint(&nb, "{s}  #{d}", .{ sl.label, sl.index }) catch sl.label, &r1, badge_font_small, fg);
+        // Wiersz 2: rozmiar i typ albo „pusty”.
+        var r2: w.RECT = .{ .left = r1.left, .top = r1.bottom, .right = r1.right, .bottom = r1.bottom + lh };
+        if (sl.occupied) {
+            var sb: [32]u8 = undefined;
+            const size = if (sl.size_bytes) |n| slotSizeText(&sb, n) else "?";
+            drawLeft(hdc, std.fmt.bufPrint(&nb, "{s} {s}", .{ size, sl.mem_type }) catch size, &r2, app.font, fg);
+        } else {
+            drawLeft(hdc, i18n.t("pusty"), &r2, app.font, fg);
+        }
+        // Wiersz 3: producent modułu.
+        var r3: w.RECT = .{ .left = r1.left, .top = r2.bottom, .right = r1.right, .bottom = r2.bottom + lh };
+        if (sl.occupied) drawLeft(hdc, if (sl.vendor.len > 0) sl.vendor else sl.manufacturer, &r3, app.font, 0x00606060);
+    }
+}
+
+fn slotAt(hwnd: w.HWND, x: i32, y: i32) ?usize {
+    const p = memoryPage() orelse return null;
+    var rc: w.RECT = undefined;
+    _ = w.GetClientRect(hwnd, &rc);
+    const g = slotGeometry(p.slots, rc.right);
+    for (g.tiles[0..g.n_tiles]) |t| {
+        if (x >= t.rect.left and x < t.rect.right and y >= t.rect.top and y < t.rect.bottom) return t.slot;
+    }
+    return null;
+}
+
+/// Kliknięcie kafelka = wybór w liście „Gniazdo” (obie kontrolki zsynchronizowane).
+fn selectSlot(i: usize) void {
+    app.sel_index[ix_memory] = i;
+    if (app.sel_combo[ix_memory]) |cb| _ = w.SendMessageW(cb, w.CB_SETCURSEL, i, 0);
+    refreshCurrent(true);
+}
+
+fn slotMapProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.winapi) w.LRESULT {
+    const WM_PAINT: u32 = 0x000F;
+    const WM_LBUTTONUP: u32 = 0x0202;
+    const WM_SETCURSOR: u32 = 0x0020;
+    const WM_ERASEBKGND: u32 = 0x0014;
+    const WM_SIZE: u32 = 0x0005;
+    switch (msg) {
+        WM_PAINT => {
+            paintSlotMap(hwnd);
+            return 0;
+        },
+        WM_ERASEBKGND => return 1,
+        WM_SIZE => {
+            _ = w.InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
+        WM_LBUTTONUP => {
+            const lp_: usize = @bitCast(lparam);
+            const x: i32 = @as(i16, @bitCast(@as(u16, @truncate(lp_))));
+            const y: i32 = @as(i16, @bitCast(@as(u16, @truncate(lp_ >> 16))));
+            if (slotAt(hwnd, x, y)) |i| selectSlot(i);
+            return 0;
+        },
+        WM_SETCURSOR => {
+            var pt: w.POINT = undefined;
+            _ = GetCursorPos(&pt);
+            _ = ScreenToClient(hwnd, &pt);
+            const over = slotAt(hwnd, pt.x, pt.y) != null;
+            _ = SetCursor(w.LoadCursorW(null, @ptrFromInt(@as(usize, if (over) 32649 else 32512))));
+            return 1;
+        },
+        else => {},
+    }
+    return w.DefWindowProcW(hwnd, msg, wp, lparam);
+}
+
+extern "user32" fn GetCursorPos(*w.POINT) callconv(.winapi) w.BOOL;
+extern "user32" fn ScreenToClient(w.HWND, *w.POINT) callconv(.winapi) w.BOOL;
+
+fn createSlotMap(inst: w.HINSTANCE) void {
+    const sc: w.WNDCLASSEXW = .{ .lpfnWndProc = slotMapProc, .hInstance = inst, .lpszClassName = slotmap_class };
+    _ = w.RegisterClassExW(&sc);
+    app.slot_map = w.CreateWindowExW(0, slotmap_class, null, w.WS_CHILD, 0, 0, 10, 10, app.tab_panels[ix_memory] orelse app.panel, null, inst, null);
+    addTip(app.slot_map);
 }

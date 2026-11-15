@@ -75,11 +75,34 @@ pub const Tab = struct {
     bands: []const Band = &.{},
     /// Filtr sekcji w trybie „Pełna lista” (pusty = wszystkie).
     list_sections: []const u8 = "",
-    /// Plakietka / logo w prawym górnym rogu (obok pierwszego pasa grup).
-    badge: ?BadgeKind = null,
+    /// Plakietki / logo w prawej kolumnie (obok pierwszych pasów grup),
+    /// od góry; małe (`BadgeKind.small`) pod dużą.
+    badges: []const BadgeKind = &.{},
+    /// Graficzna mapa gniazd pamięci nad grupami (zakładka Pamięć).
+    slot_map: bool = false,
 };
 
-pub const BadgeKind = enum { cpu, gpu };
+pub const BadgeKind = enum {
+    /// Procesor (seria / model z CPUID).
+    cpu,
+    /// Układ GPU (producent chipu, seria).
+    gpu,
+    /// Producent karty graficznej (podsystem PCI).
+    gpu_partner,
+    /// Producent płyty głównej (SMBIOS typ 2).
+    board,
+    /// Producent chipsetu (PCI).
+    chipset,
+    /// Producent wybranego modułu pamięci.
+    memory,
+    /// Producent wybranego dysku.
+    storage,
+
+    /// Mała plakietka (drugorzędna) — samo logo/nazwa, bez modelu.
+    pub fn small(self: BadgeKind) bool {
+        return self == .gpu_partner or self == .chipset;
+    }
+};
 
 // ---------------------------------------------------------------------------
 
@@ -96,7 +119,7 @@ pub const tabs = [_]Tab{
         .id = "cpu",
         .title = "CPU",
         .page = "cpu",
-        .badge = .cpu,
+        .badges = &.{.cpu},
         .bands = &.{
             &.{.{ .title = "Procesor", .rows = &.{
                 &.{.{ .label = "Nazwa", .sect = P, .field = "Nazwa", .button = "Wyszukaj", .button_link = "cpu_search", .pin = true }},
@@ -156,6 +179,7 @@ pub const tabs = [_]Tab{
         .id = "board",
         .title = "Płyta główna",
         .page = "board",
+        .badges = &.{ .board, .chipset },
         .bands = &.{
             &.{.{ .title = "Płyta główna", .rows = &.{
                 &.{.{ .label = "Producent", .sect = "Płyta główna", .field = "Producent" }},
@@ -180,12 +204,15 @@ pub const tabs = [_]Tab{
         .id = "memory",
         .title = "Pamięć",
         .page = "memory",
+        .badges = &.{.memory},
+        .slot_map = true,
         .selector = .{ .label = "pamięć\x04Gniazdo", .prefix = SLOT[1..] },
         .bands = &.{
             &.{.{ .title = "Ogólne", .rows = &.{
                 &.{ .{ .label = "Typ", .sect = "Podsumowanie", .field = "Typ" }, .{ .label = "Rozmiar", .sect = "Podsumowanie", .field = "Rozmiar całkowity", .label_w = 56 } },
                 &.{ .{ .label = "Kanały", .sect = "Podsumowanie", .field = "Kanały" }, .{ .label = "Gniazda", .sect = "Podsumowanie", .field = "Gniazda", .label_w = 56 } },
                 &.{ .{ .label = "Prędkość", .sect = "Podsumowanie", .field = "Prędkość" }, .{ .label = "Zegar DRAM", .sect = "Podsumowanie", .field = "Częstotliwość DRAM", .label_w = 72 } },
+                &.{.{ .label = "Tryb kanałów", .sect = "Mapa gniazd", .field = "Tryb pracy kanałów" }},
                 &.{.{ .label = "Timingi", .sect = "Podsumowanie", .field = "Timingi (SPD)" }},
             } }},
             &.{.{ .title = "Moduł (wybrane gniazdo)", .rows = &.{
@@ -203,7 +230,7 @@ pub const tabs = [_]Tab{
         .id = "graphics",
         .title = "Grafika",
         .page = "graphics",
-        .badge = .gpu,
+        .badges = &.{ .gpu, .gpu_partner },
         .selector = .{ .label = "Karta", .prefix = GPU[1..] },
         .bands = &.{
             &.{.{ .title = "GPU", .rows = &.{
@@ -237,6 +264,7 @@ pub const tabs = [_]Tab{
                     &.{.{ .label = "Wersja", .sect = GPU, .field = "Sterownik" }},
                     &.{.{ .label = "Data", .sect = GPU, .field = "Data sterownika" }},
                     &.{.{ .label = "Dostawca", .sect = GPU, .field = "Dostawca sterownika", .button = "Pobierz", .button_link = "drivers" }},
+                    &.{.{ .label = "VBIOS", .sect = GPU, .field = "VBIOS — wersja", .alt = "VBIOS" }},
                 } },
             },
         },
@@ -245,6 +273,7 @@ pub const tabs = [_]Tab{
         .id = "storage",
         .title = "Dyski",
         .page = "storage",
+        .badges = &.{.storage},
         .selector = .{ .label = "Dysk", .prefix = DISK[1..] },
         .bands = &.{
             &.{.{ .title = "Urządzenie", .rows = &.{
