@@ -25,10 +25,7 @@ const embedded = @import("locales_embedded");
 /// kompletności nie wymaga wszystkich identyfikatorów (pozostałe testy —
 /// nadmiarowe klucze, parametry, formy liczby mnogiej — obowiązują zawsze).
 /// Tłumacz po ukończeniu katalogu usuwa swój kod z tej listy.
-pub const pending_locales = [_][]const u8{
-    "bg", "cs", "da", "de",    "el", "es", "et", "fi", "fr",      "hr", "hu", "it", "lt",
-    "lv", "nb", "nl", "pt-BR", "ro", "ru", "sk", "sl", "sr-Latn", "sv", "tr", "uk",
-};
+pub const pending_locales = [_][]const u8{};
 
 /// Pliki, w których nie może być polskich literałów poza wywołaniami katalogu.
 const strict_files = [_][]const u8{
