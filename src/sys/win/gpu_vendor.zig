@@ -110,6 +110,12 @@ pub const Readings = struct {
     vram_bytes: ?Reading = null,
     vram_type: ?TextReading = null,
     driver_version: ?TextReading = null,
+    /// VBIOS karty (ADL `ADL2_Adapter_VideoBiosInfo_Get`, NVAPI
+    /// `NvAPI_GPU_GetVbiosVersionString`). Numer części AMD ma postać
+    /// „113-…” i często wskazuje dokładny model karty producenta.
+    vbios_part_number: ?TextReading = null,
+    vbios_version: ?TextReading = null,
+    vbios_date: ?TextReading = null,
 
     /// Zeruje tylko pola dynamiczne (przed kolejnym `poll`).
     pub fn clearDynamic(self: *Readings) void {

@@ -410,6 +410,8 @@ fn createForms() void {
                 }
                 if (c.pin) {
                     cc.pin = createText(L("BUTTON"), i18n.t("Przypnij…"), 0, child | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_PINBTN0 + @as(u16, @intCast(idx)));
+                } else if (c.pin_model) {
+                    cc.pin = createText(L("BUTTON"), i18n.t("Przypnij nazwę modelu…"), 0, child | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_PINBTN0 + @as(u16, @intCast(idx)));
                 }
                 app.cells[idx] = cc;
                 app.n_cells += 1;
@@ -502,6 +504,7 @@ const M = struct {
     const mark_w: i32 = 14;
     const btn_w: i32 = 76;
     const pin_w: i32 = 70;
+    const pin_model_w: i32 = 150;
     const sel_h: i32 = 28;
 };
 
@@ -563,7 +566,8 @@ fn layoutForm(t: usize, area: w.RECT) void {
                     const cx = inner_x + @as(i32, @intCast(k2)) * (cw + px(M.cell_gap));
                     const lw = px(if (c.label_w > 0) c.label_w else if (k2 == 0) g.label_w else 56);
                     const mw: i32 = if (app.show_sources) px(M.mark_w) else 0;
-                    const pw: i32 = if (cc.pin != null) px(M.pin_w) + px(4) else 0;
+                    const pin_w = px(if (c.pin_model) M.pin_model_w else M.pin_w);
+                    const pw: i32 = if (cc.pin != null) pin_w + px(4) else 0;
                     const bw: i32 = (if (cc.btn != null) px(M.btn_w) + px(4) else 0) + pw;
                     const eh = px(M.edit_h) + px(M.line_h) * (@as(i32, c.lines) - 1);
                     move(cc.lbl, cx, ry + px(3), lw - px(4), px(18));
@@ -571,7 +575,7 @@ fn layoutForm(t: usize, area: w.RECT) void {
                     move(cc.mark, cx + cw - mw - bw + px(3), ry + px(3), mw, px(18));
                     show(cc.mark, app.show_sources and t == app.current and !app.list_mode);
                     if (cc.btn) |b| move(b, cx + cw - bw + px(4), ry - px(1), px(M.btn_w), px(M.edit_h) + px(2));
-                    if (cc.pin) |b| move(b, cx + cw - pw + px(4), ry - px(1), px(M.pin_w), px(M.edit_h) + px(2));
+                    if (cc.pin) |b| move(b, cx + cw - pw + px(4), ry - px(1), pin_w, px(M.edit_h) + px(2));
                 }
                 ry += rowHeight(row);
             }
@@ -1167,7 +1171,8 @@ fn wndProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.win
                 update.gui.ID_AUTO => update.gui.onAutoToggled(@ptrFromInt(@as(usize, @bitCast(lparam)))),
                 update.gui.ID_CHANNEL => update.gui.onChannelToggled(@ptrFromInt(@as(usize, @bitCast(lparam)))),
                 else => if (id >= ID_PINBTN0 and id < ID_PINBTN0 + max_cells) {
-                    pinFromClipboard(&app.cells[id - ID_PINBTN0]);
+                    const c = &app.cells[id - ID_PINBTN0];
+                    if (c.cell.pin_model) pinModelFromClipboard(c) else pinFromClipboard(c);
                 } else if (id >= ID_CELLBTN0 and id < ID_CELLBTN0 + max_cells) {
                     const c = &app.cells[id - ID_CELLBTN0];
                     if (cellLink(c)) |l| openUrl(l.url);
@@ -1796,6 +1801,42 @@ fn pinFromClipboard(c: *const CellCtl) void {
     if (w.MessageBoxW(app.hwnd, widen(&wb, msg), title, MB_YESNO | w.MB_ICONINFORMATION) != 6) return;
     st.pinLink(if (gpu) .gpu else .cpu, model_key, pci, url) catch {
         _ = w.MessageBoxW(app.hwnd, widen(&wb, i18n.t("Nie udało się zapisać data\\links.toml.")), L("FerrumScope"), w.MB_OK | w.MB_ICONWARNING);
+        return;
+    };
+    refreshCurrent(true);
+}
+
+// ---------------------------------------------------------------------------
+// „Przypnij nazwę modelu…”: nazwa karty graficznej ze schowka → data\gpu_models.toml
+// ---------------------------------------------------------------------------
+
+fn pinModelFromClipboard(c: *const CellCtl) void {
+    const st = app.state orelse return;
+    const p = pageOfTab(c.tab) orelse return;
+    const idx = app.sel_index[c.tab];
+    const sub = badgeField(p, "@GPU: {name}", "Subsystem", idx);
+    if (sub.len != 9 or sub[4] != ':') return;
+    const sv = std.fmt.parseInt(u16, sub[0..4], 16) catch return;
+    const sd = std.fmt.parseInt(u16, sub[5..9], 16) catch return;
+    var cb: [2048]u8 = undefined;
+    const clip = clipboardText(&cb);
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var wb: [4096]u16 = undefined;
+    var tb: [128]u16 = undefined;
+    const title = widen(&tb, i18n.t("FerrumScope — przypnij nazwę modelu"));
+    const name = if (std.ascii.startsWithIgnoreCase(clip, "http")) null else ferrum.sys.gpu_boards.cleanModelName(clip);
+    if (name == null) {
+        const msg = i18n.tf(a, "Skopiuj do schowka nazwę modelu tej karty (np. z naklejki, pudełka albo strony producenta; 1–96 znaków, bez cudzysłowu) i kliknij „Przypnij nazwę modelu…” ponownie.\n\nPodsystem: {subsys}", .{ .subsys = sub });
+        _ = w.MessageBoxW(app.hwnd, widen(&wb, msg), title, w.MB_OK | w.MB_ICONINFORMATION);
+        return;
+    }
+    const msg = i18n.tf(a, "Przypiąć nazwę „{model}” dla karty o podsystemie {subsys}?\n\nZapis: data\\gpu_models.toml obok programu (ma pierwszeństwo przed tabelą kuratorowaną i pci.ids).", .{ .model = name.?, .subsys = sub });
+    const MB_YESNO: u32 = 0x4;
+    if (w.MessageBoxW(app.hwnd, widen(&wb, msg), title, MB_YESNO | w.MB_ICONINFORMATION) != 6) return;
+    st.pinGpuModel(sv, sd, name.?) catch {
+        _ = w.MessageBoxW(app.hwnd, widen(&wb, i18n.t("Nie udało się zapisać data\\gpu_models.toml.")), L("FerrumScope"), w.MB_OK | w.MB_ICONWARNING);
         return;
     };
     refreshCurrent(true);

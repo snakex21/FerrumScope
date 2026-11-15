@@ -129,13 +129,10 @@ pub fn build(b: *std.Build) void {
     // --- 2b. logo producentów dla GUI ---------------------------------------
     // assets/logos/*.png — POZA licencją GPL-3.0 (znaki towarowe właścicieli,
     // pochodzenie w assets/logos/SOURCES.md). Osadzane wyłącznie w GUI.
-    const logo_names = [_][]const u8{
-        "amd",                "amd-ryzen",          "amd-ryzen-threadripper", "amd-epyc",
-        "amd-radeon",         "intel",              "intel-core",             "intel-core-i3",
-        "intel-core-i5",      "intel-core-i7",      "intel-core-i9",          "intel-core-ultra-3",
-        "intel-core-ultra-5", "intel-core-ultra-7", "intel-core-ultra-9",     "intel-xeon",
-        "nvidia",             "nvidia-geforce",
-    };
+    // Lista = każdy plik *.png w assets/logos/ (czytana przy budowie,
+    // posortowana — wynik nie zależy od kolejności katalogu). Nowe logo
+    // wystarczy wrzucić do katalogu i opisać w SOURCES.md.
+    const logo_names = listLogos(b);
     const logos_files = b.addWriteFiles();
     var logos_src: std.ArrayList(u8) = .empty;
     logos_src.appendSlice(b.allocator,
@@ -157,10 +154,13 @@ pub fn build(b: *std.Build) void {
     const links_files = b.addWriteFiles();
     _ = links_files.addCopyFile(b.path("db/source/links/techpowerup.toml"), "techpowerup.toml");
     _ = links_files.addCopyFile(b.path("db/source/links/drivers.toml"), "drivers.toml");
+    // Kuratorowana tabela modeli kart graficznych (podsystem / numer części VBIOS → model).
+    _ = links_files.addCopyFile(b.path("db/source/gpu_boards.toml"), "gpu_boards.toml");
     const links_mod = links_files.add("links_embedded.zig",
         \\// Plik generowany przez build.zig. Nie edytuj ręcznie.
         \\pub const text = @embedFile("techpowerup.toml");
         \\pub const drivers_text = @embedFile("drivers.toml");
+        \\pub const gpu_boards_text = @embedFile("gpu_boards.toml");
         \\
     );
 
@@ -307,4 +307,28 @@ pub fn build(b: *std.Build) void {
 
     // --- 5. walidacja bazy bez kompilacji programu ---------------------------
     b.step("hwdb-check", "Skompiluj i zwaliduj bazę").dependOn(&run_hwdb.step);
+}
+
+/// Nazwy (bez `.png`) wszystkich logo w `assets/logos/`, posortowane.
+/// Nazwa pliku musi być kluczem producenta: małe litery, cyfry i `-`.
+fn listLogos(b: *std.Build) []const []const u8 {
+    var dir = b.build_root.handle.openDir("assets/logos", .{ .iterate = true }) catch @panic("brak katalogu assets/logos");
+    defer dir.close();
+    var names: std.ArrayList([]const u8) = .empty;
+    var it = dir.iterate();
+    while (it.next() catch @panic("nie można czytać assets/logos")) |e| {
+        if (e.kind != .file or !std.mem.endsWith(u8, e.name, ".png")) continue;
+        const stem = e.name[0 .. e.name.len - ".png".len];
+        for (stem) |c| {
+            if (!(std.ascii.isLower(c) or std.ascii.isDigit(c) or c == '-'))
+                std.debug.panic("assets/logos/{s}: nazwa pliku musi mieć tylko małe litery, cyfry i '-'", .{e.name});
+        }
+        names.append(b.allocator, b.dupe(stem)) catch @panic("OOM");
+    }
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn lt(_: void, x: []const u8, y: []const u8) bool {
+            return std.mem.lessThan(u8, x, y);
+        }
+    }.lt);
+    return names.items;
 }

@@ -21,6 +21,7 @@ const lookup = @import("lookup.zig");
 const drivers = @import("drivers.zig");
 const i18n = @import("../i18n/i18n.zig");
 const memslots = @import("memslots.zig");
+const gpu_boards = @import("gpu_boards.zig");
 const vendors = @import("../gui/vendors.zig");
 
 const Builder = report.Builder;
@@ -31,6 +32,7 @@ pub const Ctx = struct {
     pci: ?*const pciids.Db = null,
     lookup: lookup.Tables = .{},
     drivers: drivers.Tables = .{},
+    gpu_boards: gpu_boards.Tables = .{},
 };
 
 // ---------------------------------------------------------------------------
@@ -631,14 +633,15 @@ pub fn buildGraphics(arena: std.mem.Allocator, c: Ctx, live: GpuLive) report.Pag
         if (chip) |n| b.add(.{ .label = b.t("Układ GPU"), .value = n, .source = pciSource(&b, c) }) else b.add(.{ .label = b.t("Układ GPU"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = b.t("brak w pci.ids") });
         if (board) |n| {
             b.add(.{ .label = b.t("Karta"), .value = b.fmt("{s} {s}", .{ shortVendor(board_vendor orelse ""), n }), .source = b.fmt("{s} (subsystem)", .{pciSource(&b, c)}) });
-        } else if (board_vendor) |v| {
-            b.add(.{ .label = b.t("Producent karty"), .value = v, .source = b.fmt("{s} (subsystem vendor)", .{pciSource(&b, c)}), .confidence = .medium, .note = b.t("modelu karty brak w pci.ids") });
         }
+        const va = matchVendorAdapter(live, g, pci);
+        const model = addBoardModel(&b, c, g, chip, board, board_vendor, va);
         b.add(.{ .label = b.t("Identyfikator"), .value = b.fmt("{X:0>4}:{X:0>4}", .{ g.vendor, g.device }), .raw = b.fmt("VEN_{X:0>4}&DEV_{X:0>4}", .{ g.vendor, g.device }), .source = "DXGI VendorId/DeviceId" });
         b.add(.{ .label = b.t("Subsystem"), .value = b.fmt("{X:0>4}:{X:0>4}", .{ g.subVendor(), g.subDevice() }), .raw = b.fmt("0x{X:0>8}", .{g.subsys}), .source = "DXGI SubSysId" });
         b.add(.{ .label = b.t("Rewizja"), .value = b.fmt("{X:0>2}", .{g.revision}), .source = "DXGI Revision" });
         b.add(.{ .label = b.t("Pamięć dedykowana"), .value = bytesLabel(&b, g.dedicated_vram), .raw = b.fmt("{d} B", .{g.dedicated_vram}), .source = "DXGI DedicatedVideoMemory" });
         b.add(.{ .label = b.t("Pamięć współdzielona"), .value = bytesLabel(&b, g.shared_sys), .source = "DXGI SharedSystemMemory" });
+        addVbios(&b, live, g, va);
         if (pci) |p| {
             b.add(.{ .label = b.t("Lokalizacja PCI"), .value = b.fmt("{x:0>2}:{x:0>2}.{d}", .{ p.bus, p.dev, p.func }), .source = "SetupAPI DEVPKEY_Device_BusNumber/Address" });
             if (p.driver_version.len > 0) b.add(.{ .label = b.t("Sterownik"), .value = p.driver_version, .source = "DEVPKEY_Device_DriverVersion" });
@@ -655,7 +658,7 @@ pub fn buildGraphics(arena: std.mem.Allocator, c: Ctx, live: GpuLive) report.Pag
 
         // --- telemetria producenta ------------------------------------------------
         b.section(b.tf("Czujniki GPU: {name}", .{ .name = g.name }));
-        if (matchVendorAdapter(live, g, pci)) |a| {
+        if (va) |a| {
             const r = a.readings;
             const why = b.tf("{library}: brak odczytu tej wartości ({path})", .{ .library = a.vendor_library, .path = a.sensor_path });
             b.add(.{ .label = b.t("Źródło"), .value = b.fmt("{s} ({s})", .{ a.vendor_library, a.sensor_path }), .source = b.t("biblioteka producenta ładowana dynamicznie, tylko odczyt") });
@@ -681,11 +684,90 @@ pub fn buildGraphics(arena: std.mem.Allocator, c: Ctx, live: GpuLive) report.Pag
         var gp: [16]u8 = undefined;
         const gmodel = lookup.normalizeGpu(&gm, g.name);
         const gpci = std.fmt.bufPrint(&gp, "{x:0>4}:{x:0>4}", .{ g.vendor, g.device }) catch "";
-        links.gpuScoped(&b, g.vendor, if (board) |n| n else g.name, b.dup(g.name), lookup.resolve(c.lookup, .gpu, gmodel, gpci));
+        // Wyszukiwanie po dokładnym modelu karty, gdy jest znany.
+        const search_name = model orelse (if (board) |n| n else g.name);
+        links.gpuScoped(&b, g.vendor, search_name, b.dup(g.name), lookup.resolve(c.lookup, .gpu, gmodel, gpci));
         driverOverride(&b, "drivers", g.name, drivers.gpu(b.arena.alloc(u8, 256) catch &.{}, c.drivers, g.vendor, g.name, gmodel));
     }
     if (first) page.headline = b.t("Brak sprzętowej karty graficznej");
     return page;
+}
+
+/// Pola „Producent karty” i „Model karty”. Zwraca nazwę modelu do
+/// wyszukiwania (null = model nieznany).
+fn addBoardModel(b: *Builder, c: Ctx, g: snap.GpuAdapter, chip: ?[]const u8, board: ?[]const u8, board_vendor: ?[]const u8, va: ?*const gv.Adapter) ?[]const u8 {
+    const sv = g.subVendor();
+    const sd = g.subDevice();
+    const sub_src = b.fmt("{s} (subsystem vendor {X:0>4})", .{ pciSource(b, c), sv });
+    const reference = vendors.isReference(g.vendor, sv);
+    const chip_key = vendors.pciVendor(g.vendor);
+    // Krótka nazwa producenta karty („ASRock”), także do „{vendor} (model nieznany)”.
+    var partner: []const u8 = "";
+    if (reference) {
+        const cv = if (chip_key) |k| vendors.displayName(k) else shortVendor(pciVendor(c, g.vendor) orelse "?");
+        b.add(.{ .label = b.t("Producent karty"), .value = b.tf("referencyjna ({vendor})", .{ .vendor = cv }), .source = sub_src, .confidence = .medium, .note = b.t("podsystem równy producentowi układu albo pusty") });
+    } else if (vendors.gpuPartner(sv)) |key| {
+        partner = vendors.displayName(key);
+        b.add(.{ .label = b.t("Producent karty"), .value = partner, .raw = b.fmt("{X:0>4}", .{sv}), .source = sub_src, .confidence = .high, .note = if (board == null) b.t("modelu karty brak w pci.ids") else "" });
+    } else if (board_vendor) |v| {
+        partner = shortVendor(v);
+        b.add(.{ .label = b.t("Producent karty"), .value = partner, .raw = b.fmt("{X:0>4}", .{sv}), .source = sub_src, .confidence = .medium, .note = if (board == null) b.t("modelu karty brak w pci.ids") else "" });
+    } else {
+        b.add(.{ .label = b.t("Producent karty"), .value = "—", .state = .unavailable, .confidence = .unknown, .raw = b.fmt("{X:0>4}", .{sv}), .source = b.t("producent podsystemu nieznany w pci.ids") });
+    }
+
+    const vb_part: []const u8 = if (va) |a| (if (a.readings.vbios_part_number) |t| t.text.slice() else "") else "";
+    const chips = [_][]const u8{ g.name, chip orelse "" };
+    const r = gpu_boards.resolve(c.gpu_boards, .{ .sub_vendor = sv, .sub_device = sd, .vbios_part = vb_part, .pciids_board = board, .chip_names = &chips }) orelse {
+        if (reference) {
+            b.add(.{ .label = b.t("Model karty"), .value = b.dup(g.name), .source = b.t("karta referencyjna: model = nazwa układu (DXGI)"), .confidence = .medium });
+            return null;
+        }
+        b.add(.{
+            .label = b.t("Model karty"),
+            .value = b.tf("{vendor} (model nieznany)", .{ .vendor = if (partner.len > 0) partner else "?" }),
+            .state = .unavailable,
+            .confidence = .unknown,
+            .source = b.t("ani pci.ids, ani numer części VBIOS nie wskazują wersji karty; nazwę można przypiąć w GUI („Przypnij nazwę modelu…”)"),
+        });
+        return null;
+    };
+    const value = switch (r.origin) {
+        // Nazwa podsystemu pci.ids nie zawiera producenta.
+        .pciids => if (partner.len > 0) b.fmt("{s} {s}", .{ partner, r.model }) else b.dup(r.model),
+        else => b.dup(r.model),
+    };
+    switch (r.origin) {
+        .user => b.add(.{ .label = b.t("Model karty"), .value = value, .source = b.t("nazwa przypięta przez użytkownika (data\\gpu_models.toml)"), .confidence = .medium, .note = b.t("wpis użytkownika — niezweryfikowany przez program") }),
+        .curated => b.add(.{ .label = b.t("Model karty"), .value = value, .source = b.t("tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po podsystemie"), .confidence = .high }),
+        .pciids => b.add(.{ .label = b.t("Model karty"), .value = value, .source = b.fmt("{s} (subsystem)", .{pciSource(b, c)}), .confidence = .high }),
+        .vbios => b.add(.{ .label = b.t("Model karty"), .value = value, .source = b.t("tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po numerze części VBIOS"), .confidence = .medium }),
+    }
+    return value;
+}
+
+/// Pola VBIOS (numer części, wersja, data) z biblioteki producenta.
+fn addVbios(b: *Builder, live: GpuLive, g: snap.GpuAdapter, va: ?*const gv.Adapter) void {
+    const a = va orelse {
+        b.add(.{ .label = b.t("VBIOS"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = vendorReason(b, live, g.vendor) });
+        return;
+    };
+    const r = a.readings;
+    const why = b.tf("{library}: brak odczytu tej wartości ({path})", .{ .library = a.vendor_library, .path = "VBIOS" });
+    const Item = struct { label: []const u8, t: ?gv.TextReading };
+    const items = [_]Item{
+        .{ .label = b.t("VBIOS — numer części"), .t = r.vbios_part_number },
+        .{ .label = b.t("VBIOS — wersja"), .t = r.vbios_version },
+        .{ .label = b.t("VBIOS — data"), .t = r.vbios_date },
+    };
+    for (items, 0..) |f, i| {
+        if (f.t) |t| {
+            b.add(.{ .label = f.label, .value = b.dup(t.text.slice()), .source = t.source });
+        } else if (std.mem.eql(u8, a.vendor_library, "ADL") or i == 1) {
+            // NVAPI podaje tylko wersję — brak numeru części i daty pomijamy.
+            b.add(.{ .label = f.label, .value = "—", .state = .unavailable, .confidence = .unknown, .source = why });
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

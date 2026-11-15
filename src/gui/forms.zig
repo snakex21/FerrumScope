@@ -40,6 +40,9 @@ pub const Cell = struct {
     button_link: []const u8 = "",
     /// Dodatkowy przycisk „Przypnij link” (dokładna strona TechPowerUp ze schowka).
     pin: bool = false,
+    /// Przycisk „Przypnij nazwę modelu…” (nazwa karty ze schowka →
+    /// `data\gpu_models.toml`); wyklucza `pin`.
+    pin_model: bool = false,
 };
 
 pub const Row = []const Cell;
@@ -207,6 +210,7 @@ pub const tabs = [_]Tab{
                 &.{.{ .label = "Nazwa", .sect = GPU, .field = "Nazwa (sterownik)", .button = "Wyszukaj", .button_link = "gpu_search", .pin = true }},
                 &.{.{ .label = "Układ", .sect = GPU, .field = "Układ GPU" }},
                 &.{.{ .label = "Karta", .sect = GPU, .field = "Karta", .alt = "Producent karty" }},
+                &.{.{ .label = "Model karty", .sect = GPU, .field = "Model karty", .pin_model = true }},
                 &.{ .{ .label = "ID urządzenia", .sect = GPU, .field = "Identyfikator" }, .{ .label = "Subsystem", .sect = GPU, .field = "Subsystem", .label_w = 64 } },
                 &.{ .{ .label = "Rewizja", .sect = GPU, .field = "Rewizja" }, .{ .label = "Adres PCI", .sect = GPU, .field = "Lokalizacja PCI", .label_w = 64 } },
                 &.{.{ .label = "Magistrala", .sect = GPU, .field = "Łącze PCIe" }},

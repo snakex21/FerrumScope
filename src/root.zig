@@ -78,6 +78,7 @@ pub const sys = struct {
     pub const snapshot = @import("sys/snapshot.zig");
     pub const smbios = @import("sys/smbios.zig");
     pub const memslots = @import("sys/memslots.zig");
+    pub const gpu_boards = @import("sys/gpu_boards.zig");
     pub const pciids = @import("sys/pciids.zig");
     pub const pciids_format = @import("sys/pciids_format.zig");
     pub const storage_parse = @import("sys/storage_parse.zig");

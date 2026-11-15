@@ -60,6 +60,9 @@ pub const Id = struct {
     pub const GPU_GetDynamicPstatesInfoEx: u32 = 0x60ded2ed;
     pub const GPU_GetThermalSettings: u32 = 0xe3640a56;
     pub const GPU_GetAllClockFrequencies: u32 = 0xdcb616c3;
+    /// nvapi_interface.h: { "NvAPI_GPU_GetVbiosVersionString", 0xa561fd7d };
+    /// nvapi.h: NvAPI_GPU_GetVbiosVersionString(NvPhysicalGpuHandle, NvAPI_ShortString).
+    pub const GPU_GetVbiosVersionString: u32 = 0xa561fd7d;
 };
 
 // ---------------------------------------------------------------------------
@@ -189,6 +192,7 @@ const Fns = struct {
     pstates: ?*const fn (NvPhysicalGpuHandle, *NV_GPU_DYNAMIC_PSTATES_INFO_EX) callconv(.c) i32 = null,
     thermal: ?*const fn (NvPhysicalGpuHandle, u32, *NV_GPU_THERMAL_SETTINGS_V2) callconv(.c) i32 = null,
     clocks: ?*const fn (NvPhysicalGpuHandle, *NV_GPU_CLOCK_FREQUENCIES_V2) callconv(.c) i32 = null,
+    vbios_version: ?*const fn (NvPhysicalGpuHandle, *ShortString) callconv(.c) i32 = null,
 
     fn load(q: QueryInterface) Fns {
         var f: Fns = .{};
@@ -207,6 +211,7 @@ const Fns = struct {
             .{ "pstates", Id.GPU_GetDynamicPstatesInfoEx },
             .{ "thermal", Id.GPU_GetThermalSettings },
             .{ "clocks", Id.GPU_GetAllClockFrequencies },
+            .{ "vbios_version", Id.GPU_GetVbiosVersionString },
         }) |e| {
             if (q(e[1])) |p| @field(f, e[0]) = @ptrCast(@alignCast(p));
         }
@@ -373,6 +378,13 @@ pub const Session = struct {
             if (self.fns.full_name) |f| {
                 var name = std.mem.zeroes(ShortString);
                 if (f(h, &name) == NVAPI_OK) a.name = gv.Text.fromC(&name);
+            }
+            if (self.fns.vbios_version) |f| {
+                var vb = std.mem.zeroes(ShortString);
+                if (f(h, &vb) == NVAPI_OK) {
+                    const t = gv.Text.fromC(&vb);
+                    if (!t.isEmpty()) a.readings.vbios_version = .{ .text = t, .source = "NVAPI GPU_GetVbiosVersionString" };
+                }
             }
             if (self.fns.pci_ids) |f| {
                 var dev: u32 = 0;

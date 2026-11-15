@@ -29,6 +29,12 @@
 //!     ADLPMLogDataOutput, ADLODNPerformanceStatus, ADLODNFanControl,
 //!     ADLPMActivity, ADLTemperature, ADLFanSpeedValue, ADLMemoryInfo2,
 //!     ADLMemoryInfoX4, ADLVersionsInfo, ADLVersionsInfoX2.
+//!   * include/adl_structures.h (ok. wiersza 1300) — `ADLBiosInfo { char
+//!     strPartNumber[ADL_MAX_PATH]; char strVersion[ADL_MAX_PATH]; char
+//!     strDate[ADL_MAX_PATH]; }` (data w formacie „yyyy/mm/dd hh:mm”);
+//!     Public-Documents/html/adapter_8h_source.html —
+//!     `ADL2_Adapter_VideoBiosInfo_Get(ADL_CONTEXT_HANDLE, int iAdapterIndex,
+//!     ADLBiosInfo* lpBiosInfo)` (tylko odczyt).
 //!   * include/adl_sdk.h — ADL_MAIN_MALLOC_CALLBACK `void* (__stdcall*)(int)`.
 //!   * Public-Documents/html/*_8h_source.html (adl.h, adapter.h, overdrive5.h,
 //!     overdriveN.h, overdrive8.h, graphics.h) — sygnatury funkcji ADL2_*.
@@ -205,6 +211,13 @@ pub const ADLMemoryInfoX4 = extern struct {
     iMemoryBitRateX2: i64,
 };
 
+/// adl_structures.h: `typedef struct ADLBiosInfo` (3 × char[ADL_MAX_PATH]).
+pub const ADLBiosInfo = extern struct {
+    strPartNumber: [ADL_MAX_PATH]u8,
+    strVersion: [ADL_MAX_PATH]u8,
+    strDate: [ADL_MAX_PATH]u8,
+};
+
 pub const ADLVersionsInfo = extern struct {
     strDriverVer: [ADL_MAX_PATH]u8,
     strCatalystVersion: [ADL_MAX_PATH]u8,
@@ -231,6 +244,7 @@ comptime {
     std.debug.assert(@sizeOf(ADLMemoryInfo2) == 8 + 256 + 4 * 8);
     std.debug.assert(@sizeOf(ADLMemoryInfoX4) == 8 + 256 + 7 * 8);
     std.debug.assert(@sizeOf(ADLVersionsInfo) == 3 * 256);
+    std.debug.assert(@sizeOf(ADLBiosInfo) == 3 * 256);
     std.debug.assert(@sizeOf(ADLVersionsInfoX2) == 4 * 256);
 }
 
@@ -250,6 +264,7 @@ const Fns = struct {
     active_get: ?*const fn (Ctx, c_int, *c_int) callconv(.c) c_int = null,
     mem_info2: ?*const fn (Ctx, c_int, *ADLMemoryInfo2) callconv(.c) c_int = null,
     mem_info_x4: ?*const fn (Ctx, c_int, *ADLMemoryInfoX4) callconv(.c) c_int = null,
+    bios_info: ?*const fn (Ctx, c_int, *ADLBiosInfo) callconv(.c) c_int = null,
     // graphics.h
     versions: ?*const fn (Ctx, *ADLVersionsInfo) callconv(.c) c_int = null,
     versions_x2: ?*const fn (Ctx, *ADLVersionsInfoX2) callconv(.c) c_int = null,
@@ -275,6 +290,7 @@ const Fns = struct {
             .{ "active_get", "ADL2_Adapter_Active_Get" },
             .{ "mem_info2", "ADL2_Adapter_MemoryInfo2_Get" },
             .{ "mem_info_x4", "ADL2_Adapter_MemoryInfoX4_Get" },
+            .{ "bios_info", "ADL2_Adapter_VideoBiosInfo_Get" },
             .{ "versions", "ADL2_Graphics_Versions_Get" },
             .{ "versions_x2", "ADL2_Graphics_VersionsX2_Get" },
             .{ "od_caps", "ADL2_Overdrive_Caps" },
@@ -378,6 +394,17 @@ pub fn applyPmLog(data: *const ADLPMLogDataOutput, r: *gv.Readings) usize {
 
 /// Temperatura ODN: dla EDGE sterownik zwraca milistopnie, dla innych typów
 /// bywają stopnie (obserwacja LHM). Normalizujemy heurystycznie.
+/// Przepisuje `ADLBiosInfo` do odczytów (puste napisy pomijane).
+pub fn applyBiosInfo(bi: *const ADLBiosInfo, r: *gv.Readings) void {
+    const src = "ADL ADL2_Adapter_VideoBiosInfo_Get";
+    const pn = gv.Text.fromC(&bi.strPartNumber);
+    if (!pn.isEmpty()) r.vbios_part_number = .{ .text = pn, .source = src };
+    const ver = gv.Text.fromC(&bi.strVersion);
+    if (!ver.isEmpty()) r.vbios_version = .{ .text = ver, .source = src };
+    const date = gv.Text.fromC(&bi.strDate);
+    if (!date.isEmpty()) r.vbios_date = .{ .text = date, .source = src };
+}
+
 pub fn odnTempToC(raw: c_int) f64 {
     const v: f64 = @floatFromInt(raw);
     return if (@abs(v) >= 1000) v / 1000.0 else v;
@@ -614,6 +641,10 @@ pub const Session = struct {
             var ver: c_int = 0;
             if (f(self.ctx, idx, &sup, &en, &ver) == ADL_OK and sup != 0) p.od_version = ver;
         }
+        if (self.fns.bios_info) |f| {
+            var bi = std.mem.zeroes(ADLBiosInfo);
+            if (f(self.ctx, idx, &bi) == ADL_OK) applyBiosInfo(&bi, &a.readings);
+        }
         if (self.fns.mem_info_x4) |f| {
             var m = std.mem.zeroes(ADLMemoryInfoX4);
             if (f(self.ctx, idx, &m) == ADL_OK) {
@@ -847,6 +878,17 @@ test "applyPmLog: same zera supported → nic" {
 test "odnTempToC: milistopnie i stopnie" {
     try std.testing.expectEqual(@as(f64, 45), odnTempToC(45000));
     try std.testing.expectEqual(@as(f64, 45), odnTempToC(45));
+}
+
+test "applyBiosInfo: napisy C → odczyty, puste pomijane" {
+    var bi = std.mem.zeroes(ADLBiosInfo);
+    @memcpy(bi.strPartNumber[0..17], "113-D7020100-102 ");
+    @memcpy(bi.strVersion[0..14], "022.001.002.04");
+    var r: gv.Readings = .{};
+    applyBiosInfo(&bi, &r);
+    try std.testing.expectEqualStrings("113-D7020100-102", r.vbios_part_number.?.text.slice());
+    try std.testing.expectEqualStrings("022.001.002.04", r.vbios_version.?.text.slice());
+    try std.testing.expect(r.vbios_date == null);
 }
 
 test "isAmdVendorField" {

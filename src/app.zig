@@ -69,6 +69,7 @@ pub const State = struct {
     links_arena: std.heap.ArenaAllocator,
     links: lookup.Tables = .{},
     driver_links: ferrum.sys.drivers.Tables = .{},
+    gpu_boards: ferrum.sys.gpu_boards.Tables = .{},
     page_arena: std.heap.ArenaAllocator,
     snap: snapshot.Snapshot = .{},
 
@@ -292,6 +293,25 @@ pub const State = struct {
         return std.fmt.bufPrint(buf, "{s}{c}data{c}driver_links.toml", .{ dir, std.fs.path.sep, std.fs.path.sep }) catch null;
     }
 
+    /// `data\gpu_models.toml` obok programu (nazwy modeli kart przypięte przez użytkownika).
+    pub fn gpuModelsPath(buf: []u8) ?[]const u8 {
+        var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const dir = std.fs.selfExeDirPath(&dir_buf) catch return null;
+        return std.fmt.bufPrint(buf, "{s}{c}data{c}gpu_models.toml", .{ dir, std.fs.path.sep, std.fs.path.sep }) catch null;
+    }
+
+    /// Przypina nazwę modelu karty dla podsystemu (zapis do `data\gpu_models.toml`).
+    pub fn pinGpuModel(self: *State, sub_vendor: u16, sub_device: u16, model_name: []const u8) !void {
+        const name = ferrum.sys.gpu_boards.cleanModelName(model_name) orelse return error.InvalidName;
+        var pb: [std.fs.max_path_bytes]u8 = undefined;
+        const path = gpuModelsPath(&pb) orelse return error.NoPath;
+        if (std.fs.path.dirname(path)) |d| std.fs.cwd().makePath(d) catch {};
+        const text = try ferrum.sys.gpu_boards.withPinned(self.gpa, self.gpu_boards.user, sub_vendor, sub_device, name);
+        defer self.gpa.free(text);
+        try std.fs.cwd().writeFile(.{ .sub_path = path, .data = text });
+        self.loadLinks();
+    }
+
     /// Tabela kuratorowana (osadzona) + linki przypięte przez użytkownika.
     pub fn loadLinks(self: *State) void {
         _ = self.links_arena.reset(.free_all);
@@ -304,6 +324,16 @@ pub const State = struct {
             if (driverLinksPath(&dpb)) |dp| {
                 if (std.fs.cwd().readFileAlloc(a, dp, 256 * 1024)) |dt| {
                     self.driver_links.user = ferrum.sys.drivers.parse(a, dt) catch &.{};
+                } else |_| {}
+            }
+        }
+        self.gpu_boards.curated = ferrum.sys.gpu_boards.parse(a, links_embedded.gpu_boards_text) catch &.{};
+        self.gpu_boards.user = &.{};
+        {
+            var gpb: [std.fs.max_path_bytes]u8 = undefined;
+            if (gpuModelsPath(&gpb)) |gp| {
+                if (std.fs.cwd().readFileAlloc(a, gp, 256 * 1024)) |gt| {
+                    self.gpu_boards.user = ferrum.sys.gpu_boards.parse(a, gt) catch &.{};
                 } else |_| {}
             }
         }
@@ -406,7 +436,7 @@ pub const State = struct {
     pub fn buildPages(self: *State) []report.Page {
         _ = self.page_arena.reset(.retain_capacity);
         const a = self.page_arena.allocator();
-        const ctx: pages_system.Ctx = .{ .snap = &self.snap, .pci = pci_embedded.get(), .lookup = self.links, .drivers = self.driver_links };
+        const ctx: pages_system.Ctx = .{ .snap = &self.snap, .pci = pci_embedded.get(), .lookup = self.links, .drivers = self.driver_links, .gpu_boards = self.gpu_boards };
         const live = self.gpuLive(a);
         const pages = a.alloc(report.Page, 6) catch return &.{};
         pages[0] = self.cpuPage(a);

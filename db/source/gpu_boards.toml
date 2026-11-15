@@ -1,0 +1,28 @@
+# FerrumScope — kuratorowana tabela modeli kart graficznych (wpisy ręczne).
+#
+# Dopasowanie po podsystemie PCI (SUBSYS: producent:urządzenie, szesnastkowo)
+# i/lub po przedrostku numeru części VBIOS (ADL ADL2_Adapter_VideoBiosInfo_Get,
+# pole strPartNumber, np. „113-…”). Wpis z samym `vbios_prefix` ma pewność
+# średnią; z `subsys` — wysoką.
+#
+# Zasada: dodajemy wyłącznie wpisy, które wykrycie POTWIERDZA (podsystem
+# i numer części odczytane z prawdziwej karty + nazwa modelu z naklejki /
+# pudełka / strony producenta dla tego numeru części). Nie zgadujemy modelu
+# z samego podsystemu — jeden podsystem bywa używany przez kilka wersji karty.
+#
+# Kolejność źródeł w programie: data\gpu_models.toml (przypięte przez
+# użytkownika) > ta tabela > nazwa podsystemu z pci.ids > ta tabela tylko po
+# numerze części VBIOS.
+#
+# Format:
+#
+# [[board]]
+# subsys = "vvvv:dddd"
+# vbios_prefix = "113-..."      # opcjonalnie
+# model = "Producent Model"
+# source = "manual"
+#
+# Karta 1849:5304 (ASRock, Navi 31 / Radeon RX 7900 XTX) z maszyny
+# referencyjnej projektu: pci.ids podaje dla podsystemu tylko „Radeon RX 7900
+# XTX”, a numer części VBIOS nie zawiera nazwy wersji karty — wpisu brak
+# (model pokazywany jako „ASRock (model nieznany)”, do przypięcia w GUI).
