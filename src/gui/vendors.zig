@@ -629,6 +629,41 @@ fn expectKey(expected: ?[]const u8, raw: []const u8) !void {
     }
 }
 
+/// Klucz producenta modułu z numeru części (pole producenta bywa puste albo
+/// „Unknown”). Tylko powszechnie znane przedrostki numerów części.
+pub fn partNumberVendorKey(pn: []const u8) ?[]const u8 {
+    const p = std.mem.trim(u8, pn, " \t");
+    const table = [_]struct { prefix: []const u8, key: []const u8 }{
+        .{ .prefix = "F3-", .key = "gskill" }, // G.Skill DDR3, np. F3-1600C9D-16GXM
+        .{ .prefix = "F4-", .key = "gskill" }, // G.Skill DDR4, np. F4-4000C18-16GTZR
+        .{ .prefix = "F5-", .key = "gskill" }, // G.Skill DDR5, np. F5-6000J3038F16G
+        .{ .prefix = "CMK", .key = "corsair" }, // Corsair Vengeance LPX, np. CMK16GX4M2B3200C16
+        .{ .prefix = "CMW", .key = "corsair" }, // Corsair Vengeance RGB Pro
+        .{ .prefix = "CMT", .key = "corsair" }, // Corsair Dominator Platinum RGB
+        .{ .prefix = "CMH", .key = "corsair" }, // Corsair Vengeance RGB DDR5
+        .{ .prefix = "KHX", .key = "kingston" }, // Kingston HyperX
+        .{ .prefix = "KF4", .key = "kingston" }, // Kingston FURY DDR4
+        .{ .prefix = "KF5", .key = "kingston" }, // Kingston FURY DDR5
+        .{ .prefix = "KVR", .key = "kingston" }, // Kingston ValueRAM
+        .{ .prefix = "HMA", .key = "skhynix" }, // SK hynix DDR4, np. HMA81GU6CJR8N-VK
+        .{ .prefix = "HMCG", .key = "skhynix" }, // SK hynix DDR5
+        .{ .prefix = "M378", .key = "samsung" }, // Samsung UDIMM, np. M378A1K43EB2-CWE
+        .{ .prefix = "M471", .key = "samsung" }, // Samsung SO-DIMM
+        .{ .prefix = "M323", .key = "samsung" }, // Samsung DDR5 UDIMM
+        .{ .prefix = "MTA", .key = "micron" }, // Micron, np. MTA8ATF1G64AZ-3G2R1
+        .{ .prefix = "BL", .key = "crucial" }, // Crucial Ballistix, np. BL8G32C16U4B
+        .{ .prefix = "CT", .key = "crucial" }, // Crucial, np. CT16G4DFRA32A
+    };
+    for (table) |e| {
+        if (p.len > e.prefix.len and std.ascii.startsWithIgnoreCase(p, e.prefix)) {
+            // „BL”/„CT” bez cyfry po przedrostku to nie numer części Crucial.
+            if (e.prefix.len == 2 and !std.ascii.isDigit(p[2])) continue;
+            return e.key;
+        }
+    }
+    return null;
+}
+
 test "vendors: producenci płyt głównych (SMBIOS typ 2)" {
     try expectKey("asrock", "ASRock");
     try expectKey("asus", "ASUSTeK COMPUTER INC.");
