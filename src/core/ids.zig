@@ -26,11 +26,11 @@ pub const CpuVendor = enum {
     pub fn fromLeaf0(bx: u32, dx: u32, cx: u32) CpuVendor {
         // Kolejność bajtów to EBX, EDX, ECX — to NIE jest ASCII.
         const v = [12]u8{
-            @truncate(bx & 0xFF),        @truncate((bx >> 8) & 0xFF),
+            @truncate(bx & 0xFF),         @truncate((bx >> 8) & 0xFF),
             @truncate((bx >> 16) & 0xFF), @truncate((bx >> 24) & 0xFF),
-            @truncate(dx & 0xFF),        @truncate((dx >> 8) & 0xFF),
+            @truncate(dx & 0xFF),         @truncate((dx >> 8) & 0xFF),
             @truncate((dx >> 16) & 0xFF), @truncate((dx >> 24) & 0xFF),
-            @truncate(cx & 0xFF),        @truncate((cx >> 8) & 0xFF),
+            @truncate(cx & 0xFF),         @truncate((cx >> 8) & 0xFF),
             @truncate((cx >> 16) & 0xFF), @truncate((cx >> 24) & 0xFF),
         };
         inline for (.{

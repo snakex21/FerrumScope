@@ -663,8 +663,7 @@ fn cmdReplay(alloc: std.mem.Allocator, path: []const u8, rest: [][:0]u8) !u8 {
     return report(res.unwrap().?, db, mode, path);
 }
 
-fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb,
-          mode: Mode, origin: []const u8) !u8 {
+fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb, mode: Mode, origin: []const u8) !u8 {
     var info = model.CpuInfo{};
     const outcome = decoder.decode(&raw_info, db, &info);
     const w = out();
@@ -691,7 +690,7 @@ fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb,
             });
             if (info.variant) |v| try w.print("  Variant     : {s} (źródło: {s})\n", .{ v, info.variant_source.toSlice() });
             try w.print("  Cores       : {d} physical / {d} logical ({d} wątk/rdzeń, źródło: {s})\n", .{
-                info.cores_physical, info.threads_logical, info.threads_per_core,
+                info.cores_physical,            info.threads_logical, info.threads_per_core,
                 info.topology_source.toSlice(),
             });
             if (info.packages > 1) {
@@ -732,7 +731,7 @@ fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb,
                 try w.print("  Caches      :\n", .{});
                 for (info.cacheSlice()) |c| {
                     try w.print("      L{d} {s: <12} {d: >6} KiB  {d}-way, line {d} B\n", .{
-                        c.level, @tagName(c.kind), (c.size_bytes + 1023) / 1024,
+                        c.level,         @tagName(c.kind), (c.size_bytes + 1023) / 1024,
                         c.associativity, c.line_size,
                     });
                 }
@@ -886,13 +885,7 @@ fn writeJson(w: *std.Io.Writer, info: *const model.CpuInfo, outcome: decoder.Dec
         \\  "display_source": "{s}",
         \\  "match": "{s}",
         \\  "decode": "{s}",
-    , .{@as([]const u8, if (info.available) "true" else "false"),
-        @tagName(info.arch), info.vendor.toSlice(),
-        info.displayName(&name_buf), info.signature.eax,
-        info.display_family, info.display_model, info.stepping,
-        info.brandSlice(),
-        jsonOptStr(info.microarchitecture, &b1), jsonOptStr(info.codename, &b2),
-        @tagName(info.display), info.match.toSlice(), outcome.toSlice()});
+    , .{ @as([]const u8, if (info.available) "true" else "false"), @tagName(info.arch), info.vendor.toSlice(), info.displayName(&name_buf), info.signature.eax, info.display_family, info.display_model, info.stepping, info.brandSlice(), jsonOptStr(info.microarchitecture, &b1), jsonOptStr(info.codename, &b2), @tagName(info.display), info.match.toSlice(), outcome.toSlice() });
     // Osobne wywołanie `print`, bo Zig dopuszcza maks. 32 argumenty na wywołanie,
     // a pełna lista pól ich przekracza. Podział jest **dokładnie** na granicy
     // placeholderów: powyżej `decode` (14 pól), poniżej pola identyfikacji
@@ -927,34 +920,12 @@ fn writeJson(w: *std.Io.Writer, info: *const model.CpuInfo, outcome: decoder.Dec
         \\  "db_source": {s},
         \\  "db_source_url": {s},
         \\  "caches": [
-    , .{jsonOptStr(info.stepping_name, &b5),
-        info.stepping_name_source.toSlice(),
-        info.stepping_name_provenance.confidence.toSlice(),
-        info.stepping_name_provenance.source_type.toSlice(),
-        jsonOptStr(info.socket_name, &b6),
-        info.socket_source.toSlice(),
-        info.socket_confidence.toSlice(),
-        info.socket_provenance.source_type.toSlice(),
-        info.package_contacts,
-        @as([]const u8, if (info.package_contacts != 0) "true" else "false"),
-        jsonOptStr(info.smbios_socket_designation, &b7),
-        jsonOptStr(info.product_name, &b8),
-        jsonOptStr(info.variant, &b9),
-        info.variant_source.toSlice(),
-        jsonOptStr(info.cache_variant, &b10),
-        info.cache_variant_source.toSlice(),
-        info.codename_source.toSlice(),
-        info.microarchitecture_source.toSlice(),
-        info.cores_physical, info.threads_logical, info.threads_per_core,
-        info.topology_source.toSlice(),
-        @as([]const u8, if (info.topology_confident) "true" else "false"),
-        @as([]const u8, if (info.smt) "true" else "false"), leaves,
-        jsonOptStr(info.db_source, &b3), jsonOptStr(info.db_source_url, &b4)});
+    , .{ jsonOptStr(info.stepping_name, &b5), info.stepping_name_source.toSlice(), info.stepping_name_provenance.confidence.toSlice(), info.stepping_name_provenance.source_type.toSlice(), jsonOptStr(info.socket_name, &b6), info.socket_source.toSlice(), info.socket_confidence.toSlice(), info.socket_provenance.source_type.toSlice(), info.package_contacts, @as([]const u8, if (info.package_contacts != 0) "true" else "false"), jsonOptStr(info.smbios_socket_designation, &b7), jsonOptStr(info.product_name, &b8), jsonOptStr(info.variant, &b9), info.variant_source.toSlice(), jsonOptStr(info.cache_variant, &b10), info.cache_variant_source.toSlice(), info.codename_source.toSlice(), info.microarchitecture_source.toSlice(), info.cores_physical, info.threads_logical, info.threads_per_core, info.topology_source.toSlice(), @as([]const u8, if (info.topology_confident) "true" else "false"), @as([]const u8, if (info.smt) "true" else "false"), leaves, jsonOptStr(info.db_source, &b3), jsonOptStr(info.db_source_url, &b4) });
 
     for (info.cacheSlice(), 0..) |c, i| {
         if (i > 0) try w.writeAll(",");
         try w.print("\n    {{\"level\": {d}, \"kind\": \"{s}\", \"size_bytes\": {d}, \"line_size\": {d}, \"associativity\": {d}, \"shared\": {s}}}", .{
-            c.level, @tagName(c.kind), c.size_bytes, c.line_size, c.associativity,
+            c.level,                                            @tagName(c.kind), c.size_bytes, c.line_size, c.associativity,
             @as([]const u8, if (c.shared) "true" else "false"),
         });
     }

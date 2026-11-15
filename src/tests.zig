@@ -238,11 +238,11 @@ test "regresja: sumy wątków zgadzają się z liczbą rdzeni na każdym fixture
     // skąd wiadomo, że to zły rdzeń? Ten test wymusza, żeby suma wątków
     // na rdzenie zgadzała się z tym, co deklaruje system.
     const cases = [_]struct { name: []const u8, data: []const u8, cores: u16, threads: u16, measured: bool, scanned: u32, packages: u16 }{
-        .{ .name = "legacy",  .data = fixtures.intel_legacy_no_topology, .cores = 2,  .threads = 2,  .measured = false, .scanned = 0,  .packages = 1 },
-        .{ .name = "leaf0b",  .data = fixtures.intel_leaf0b,             .cores = 4,  .threads = 8,  .measured = true,  .scanned = 8,  .packages = 1 },
-        .{ .name = "leaf1f",  .data = fixtures.intel_leaf1f,             .cores = 8,  .threads = 16, .measured = true,  .scanned = 16, .packages = 1 },
-        .{ .name = "hybrid",  .data = fixtures.intel_hybrid_12900k,      .cores = 16, .threads = 24, .measured = true,  .scanned = 24, .packages = 1 },
-        .{ .name = "2xsocket", .data = fixtures.intel_2xsocket_8core,     .cores = 16, .threads = 32, .measured = true,  .scanned = 32, .packages = 2 },
+        .{ .name = "legacy", .data = fixtures.intel_legacy_no_topology, .cores = 2, .threads = 2, .measured = false, .scanned = 0, .packages = 1 },
+        .{ .name = "leaf0b", .data = fixtures.intel_leaf0b, .cores = 4, .threads = 8, .measured = true, .scanned = 8, .packages = 1 },
+        .{ .name = "leaf1f", .data = fixtures.intel_leaf1f, .cores = 8, .threads = 16, .measured = true, .scanned = 16, .packages = 1 },
+        .{ .name = "hybrid", .data = fixtures.intel_hybrid_12900k, .cores = 16, .threads = 24, .measured = true, .scanned = 24, .packages = 1 },
+        .{ .name = "2xsocket", .data = fixtures.intel_2xsocket_8core, .cores = 16, .threads = 32, .measured = true, .scanned = 32, .packages = 2 },
     };
     for (cases) |c| {
         const r = try runFixture(c.data);

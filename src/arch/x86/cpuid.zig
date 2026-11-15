@@ -689,8 +689,7 @@ fn executeX86(leaf: u32, subleaf: u32) raw.Regs {
           [d] "={edx}" (edx),
         : [leaf] "{eax}" (leaf),
           [sub] "{ecx}" (subleaf),
-        : .{ .cc = true }
-    );
+        : .{ .cc = true });
     return .{ .eax = eax, .ebx = ebx, .ecx = ecx, .edx = edx };
 }
 

@@ -14,7 +14,6 @@ const std = @import("std");
 /// uruchomienie programu.
 ///
 /// Korzystamy wyłącznie z przypiętego toolchainu (`tools/TOOLCHAIN.md`).
-
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});

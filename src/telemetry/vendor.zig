@@ -383,8 +383,8 @@ test "provenance: każdy zarejestrowany rejestr ma źródło i rodziny" {
     // Rejestr bez `source` to w tym projekcie błąd: znaczenie musi być
     // powiązane z dokumentem, inaczej ktoś je „dopowie" z nazwy.
     const specs = [_]RegisterSpec{
-        amd.aperf,   amd.mperf,   amd.temp_raw,         amd.pstate,
-        intel.aperf, intel.mperf, intel.therm_status,   intel.rapl_power_unit,
+        amd.aperf,             amd.mperf,             amd.temp_raw,       amd.pstate,
+        intel.aperf,           intel.mperf,           intel.therm_status, intel.rapl_power_unit,
         intel.rapl_pkg_energy, intel.rapl_pp0_energy,
     };
     for (specs) |s| {

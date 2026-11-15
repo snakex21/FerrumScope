@@ -752,8 +752,7 @@ pub fn wWinMain(inst: w.HINSTANCE, _: ?w.HINSTANCE, cmd: [*:0]u16, show: c_int) 
     };
     if (w.RegisterClassExW(&wc) == 0) return 1;
 
-    const hwnd = w.CreateWindowExW(0, class_name, window_title, w.WS_OVERLAPPEDWINDOW | w.WS_CLIPCHILDREN,
-        w.CW_USEDEFAULT, w.CW_USEDEFAULT, 640, 600, null, null, inst, null) orelse return 1;
+    const hwnd = w.CreateWindowExW(0, class_name, window_title, w.WS_OVERLAPPEDWINDOW | w.WS_CLIPCHILDREN, w.CW_USEDEFAULT, w.CW_USEDEFAULT, 640, 600, null, null, inst, null) orelse return 1;
     app.hwnd = hwnd;
     app.dpi = w.GetDpiForWindow(hwnd);
     if (app.dpi == 0) app.dpi = 96;

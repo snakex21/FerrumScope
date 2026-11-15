@@ -133,26 +133,26 @@ pub fn decode(in: *const raw.RawCpuInfo, db: hwdb.Hwdb, out: *model.CpuInfo) Dec
 
         // Quirks tylko przy trafieniu na konkretny model — patrz `canUseQuirks`.
         if (hwdb.canUseQuirks(m)) {
-        const q = m.entry.quirkFlags();
-        if (q.no_brand_string) out.brand_valid = false;
-        if (q.htt_unreliable and in.topology.leaf_b_valid) {
-            out.threads_logical = in.topology.logical_from_leaf_b;
-        }
-        if (q.hybrid_cores) {
-            // Alder Lake: część rdzeni ma SMT wyłączone, więc dzielenie
-            // threads / smt_width dałoby fałszywą liczbę. Wolimy nie podawać
-            // liczby niż podać błędną.
-            //
-            // Ten quirk **nie może** kasować wyniku pomiaru. Powstał, gdy pomiaru
-            // per-CPU jeszcze nie było, i od tamtej pory kasował wszystko —
-            // także liczbę rdzeni **zmierzoną** z liścia 0x1F, gdzie widać
-            // osobno, ile jest P-core, a ile E-core. Uznanie wpisu w bazie za
-            // ważniejszy niż sprzęt to dokładnie odwrotność podejścia CPU-Z.
-            const measured = hw_topo.hardware_complete and hw_topo.physical_from_hardware > 0;
-            if (!measured) {
-                out.cores_physical = 0;
-                out.smt = false;
+            const q = m.entry.quirkFlags();
+            if (q.no_brand_string) out.brand_valid = false;
+            if (q.htt_unreliable and in.topology.leaf_b_valid) {
+                out.threads_logical = in.topology.logical_from_leaf_b;
             }
+            if (q.hybrid_cores) {
+                // Alder Lake: część rdzeni ma SMT wyłączone, więc dzielenie
+                // threads / smt_width dałoby fałszywą liczbę. Wolimy nie podawać
+                // liczby niż podać błędną.
+                //
+                // Ten quirk **nie może** kasować wyniku pomiaru. Powstał, gdy pomiaru
+                // per-CPU jeszcze nie było, i od tamtej pory kasował wszystko —
+                // także liczbę rdzeni **zmierzoną** z liścia 0x1F, gdzie widać
+                // osobno, ile jest P-core, a ile E-core. Uznanie wpisu w bazie za
+                // ważniejszy niż sprzęt to dokładnie odwrotność podejścia CPU-Z.
+                const measured = hw_topo.hardware_complete and hw_topo.physical_from_hardware > 0;
+                if (!measured) {
+                    out.cores_physical = 0;
+                    out.smt = false;
+                }
             }
         }
     }

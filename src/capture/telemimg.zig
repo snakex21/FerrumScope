@@ -491,7 +491,10 @@ test "replay: zapisany blad wraca jako ten sam blad" {
     var img = Captured{ .source = "synthetic", .present = true };
     img.cpu_count = 1;
     img.failures[0] = .{
-        .timestamp_ns = 0, .logical_cpu = 0, .msr_index = 0xE8, .kind = .permission_denied,
+        .timestamp_ns = 0,
+        .logical_cpu = 0,
+        .msr_index = 0xE8,
+        .kind = .permission_denied,
     };
     img.failures_len = 1;
 

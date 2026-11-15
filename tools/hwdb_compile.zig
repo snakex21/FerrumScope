@@ -303,7 +303,6 @@ fn writeZig(path: []const u8, image: []const u8) !void {
 }
 
 /// Serializuje wpisy do binarnego obrazu (nagłówek + pula napisów + wpisy).
-
 fn parseFile(p: *Parser, path: []const u8, text: []const u8) void {
     const base = std.fs.path.basename(path);
     var in_entry = false;
