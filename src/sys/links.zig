@@ -17,6 +17,14 @@
 const std = @import("std");
 const report = @import("report.zig");
 const ids = @import("../core/ids.zig");
+const lookup = @import("lookup.zig");
+
+/// Dokładna strona (przypięta / z tabeli kuratorowanej) jako pierwszy odnośnik
+/// „Szukaj …” — GUI i plakietka biorą pierwszy pasujący, więc wygrywa ona.
+fn exactLink(b: *report.Builder, prefix: []const u8, exact: ?lookup.Resolved) void {
+    const r = exact orelse return;
+    b.link(.{ .label = b.fmt("{s} — strona TechPowerUp", .{prefix}), .url = r.url, .note = r.origin.label() });
+}
 
 /// Kodowanie procentowe zapytania (RFC 3986, spacja → `+`).
 pub fn urlEncode(b: *report.Builder, s: []const u8) []const u8 {
@@ -49,6 +57,11 @@ fn mfgrOfPci(vendor: u16) ?[]const u8 {
 }
 
 pub fn gpu(b: *report.Builder, vendor: u16, name: []const u8) void {
+    gpuExact(b, vendor, name, null);
+}
+
+pub fn gpuExact(b: *report.Builder, vendor: u16, name: []const u8, exact: ?lookup.Resolved) void {
+    exactLink(b, "Szukaj karty", exact);
     if (mfgrOfPci(vendor)) |m| {
         b.link(.{ .label = b.fmt("TechPowerUp GPU DB ({s})", .{m}), .url = b.fmt("https://www.techpowerup.com/gpu-specs/?mfgr={s}&sort=name", .{m}), .note = "lista bazy filtrowana po producencie" });
     }
@@ -69,13 +82,14 @@ pub fn gpu(b: *report.Builder, vendor: u16, name: []const u8) void {
 
 /// Jak `gpu`, ale każdy odnośnik oznaczony `scope` (np. nazwą karty), żeby GUI
 /// mogło pokazać przyciski właściwej karty przy kilku GPU.
-pub fn gpuScoped(b: *report.Builder, vendor: u16, name: []const u8, scope: []const u8) void {
+pub fn gpuScoped(b: *report.Builder, vendor: u16, name: []const u8, scope: []const u8, exact: ?lookup.Resolved) void {
     const first = b.page.links.items.len;
-    gpu(b, vendor, name);
+    gpuExact(b, vendor, name, exact);
     for (b.page.links.items[first..]) |*l| l.scope = scope;
 }
 
-pub fn cpu(b: *report.Builder, vendor: ids.CpuVendor, name: []const u8) void {
+pub fn cpu(b: *report.Builder, vendor: ids.CpuVendor, name: []const u8, exact: ?lookup.Resolved) void {
+    exactLink(b, "Szukaj CPU", exact);
     const m: ?[]const u8 = switch (vendor) {
         .amd => "AMD",
         .intel => "Intel",

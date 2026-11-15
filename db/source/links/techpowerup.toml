@@ -1,0 +1,34 @@
+# FerrumScope — kuratorowana tabela linków do stron bazy TechPowerUp.
+#
+# Strony TechPowerUp mają numeryczne ID (…/cpu-specs/<nazwa>.c<id>), którego
+# nie da się wyprowadzić z CPUID ani PCI. Ta tabela mapuje znormalizowaną
+# nazwę modelu (src/sys/lookup.zig: normalizeCpu / normalizeGpu) na dokładny
+# adres strony.
+#
+# ZASADY:
+#   * wpisy dodaje CZŁOWIEK (source = "manual"), który otworzył stronę
+#     w przeglądarce i sprawdził, że opisuje ten model;
+#   * NIE generujemy tej tabeli crawlingiem ani masowym pobieraniem stron;
+#   * przechowujemy wyłącznie adres URL — żadnych danych ze strony;
+#   * `pci` (vendor:device) dla GPU jest opcjonalne; gdy podane, musi się
+#     zgadzać z wykrytą kartą (ten sam układ bywa w kilku modelach).
+#
+# Jak dodać wpis: wpisz nazwę tak, jak pokazuje ją `ferrumscope cpu` / GUI po
+# normalizacji (małe litery, bez „AMD/Intel/NVIDIA”, „Processor”, „8-Core”),
+# np. „AMD Ryzen 7 5800X3D 8-Core Processor” → "ryzen 7 5800x3d", dodaj URL
+# z paska przeglądarki i `source = "manual"`, uruchom `zig build test`.
+# Użytkownik może też przypiąć własny link w GUI („Przypnij link”) — trafia do
+# data\links.toml obok programu i ma pierwszeństwo przed tą tabelą.
+
+[[cpu]]
+model = "ryzen 7 5800x3d"
+url = "https://www.techpowerup.com/cpu-specs/ryzen-7-5800x3d.c2532"
+source = "manual"
+# Adres podany przez właściciela sprzętu (2026-11-15).
+
+[[gpu]]
+model = "radeon rx 7900 xtx"
+pci = "1002:744c"
+url = "https://www.techpowerup.com/gpu-specs/radeon-rx-7900-xtx.c3941"
+source = "manual"
+# Zweryfikowane jednym zwykłym żądaniem strony (HTTP 200, bez przekierowania), 2026-11-15.

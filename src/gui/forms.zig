@@ -30,6 +30,8 @@ pub const Cell = struct {
     /// zaczyna się od `button_link` (i pasuje do bieżącej instancji).
     button: []const u8 = "",
     button_link: []const u8 = "",
+    /// Dodatkowy przycisk „Przypnij link” (dokładna strona TechPowerUp ze schowka).
+    pin: bool = false,
 };
 
 pub const Row = []const Cell;
@@ -81,7 +83,7 @@ pub const tabs = [_]Tab{
         .badge = .cpu,
         .bands = &.{
             &.{.{ .title = "Procesor", .rows = &.{
-                &.{.{ .label = "Nazwa", .sect = P, .field = "Nazwa", .button = "Wyszukaj", .button_link = "Szukaj CPU" }},
+                &.{.{ .label = "Nazwa", .sect = P, .field = "Nazwa", .button = "Wyszukaj", .button_link = "Szukaj CPU", .pin = true }},
                 &.{ .{ .label = "Nazwa kodowa", .sect = P, .field = "Nazwa kodowa" }, .{ .label = "Rewizja", .sect = P, .field = "Rewizja", .label_w = 56 } },
                 &.{ .{ .label = "Gniazdo", .sect = P, .field = "Gniazdo" }, .{ .label = "Technologia", .sect = P, .field = "Technologia", .label_w = 72 } },
                 &.{.{ .label = "Specyfikacja", .sect = P, .field = "Brand string" }},
@@ -189,7 +191,7 @@ pub const tabs = [_]Tab{
         .selector = .{ .label = "Karta", .prefix = "GPU: " },
         .bands = &.{
             &.{.{ .title = "GPU", .rows = &.{
-                &.{.{ .label = "Nazwa", .sect = "@GPU: ", .field = "Nazwa (sterownik)", .button = "Wyszukaj", .button_link = "Szukaj karty" }},
+                &.{.{ .label = "Nazwa", .sect = "@GPU: ", .field = "Nazwa (sterownik)", .button = "Wyszukaj", .button_link = "Szukaj karty", .pin = true }},
                 &.{.{ .label = "Układ", .sect = "@GPU: ", .field = "Układ GPU" }},
                 &.{.{ .label = "Karta", .sect = "@GPU: ", .field = "Karta", .alt = "Producent karty" }},
                 &.{ .{ .label = "ID urządzenia", .sect = "@GPU: ", .field = "Identyfikator" }, .{ .label = "Subsystem", .sect = "@GPU: ", .field = "Subsystem", .label_w = 64 } },

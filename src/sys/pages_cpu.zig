@@ -12,6 +12,7 @@ const decoder = @import("../decode/cpu_x86.zig");
 const isa = @import("../decode/isa_x86.zig");
 const report = @import("report.zig");
 const links = @import("links.zig");
+const lookup = @import("lookup.zig");
 
 /// Pomiary na żywo (bez sterownika). Wszystkie pola opcjonalne: replay ich nie ma.
 pub const LiveCpu = struct {
@@ -40,6 +41,8 @@ pub const CpuInput = struct {
     live: ?LiveCpu = null,
     /// Zegar zewnętrzny (magistrali) z SMBIOS typ 4, offset 12h. `null` = brak.
     bus_mhz: ?u32 = null,
+    /// Tabele linków TechPowerUp (przypięte + kuratorowane).
+    lookup: lookup.Tables = .{},
 };
 
 fn kb(bytes: u64) u64 {
@@ -294,6 +297,8 @@ pub fn build(arena: std.mem.Allocator, in: CpuInput) report.Page {
         b.add(.{ .label = "Diagnostyka", .value = b.dup(raw_info.diagnostics.get(i)), .source = "probe" });
     }
 
-    links.cpu(&b, info.vendor, page.headline);
+    var mb: [128]u8 = undefined;
+    const lk_model = lookup.normalizeCpu(&mb, if (info.brand_valid) info.brandSlice() else page.headline);
+    links.cpu(&b, info.vendor, page.headline, lookup.resolve(in.lookup, .cpu, lk_model, ""));
     return page;
 }

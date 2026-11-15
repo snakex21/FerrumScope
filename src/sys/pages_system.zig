@@ -13,6 +13,7 @@ const pciids = @import("pciids.zig");
 const sp = @import("storage_parse.zig");
 const gv = @import("win/gpu_vendor.zig");
 const links = @import("links.zig");
+const lookup = @import("lookup.zig");
 
 const Builder = report.Builder;
 const Field = report.Field;
@@ -20,6 +21,7 @@ const Field = report.Field;
 pub const Ctx = struct {
     snap: *const snap.Snapshot,
     pci: ?*const pciids.Db = null,
+    lookup: lookup.Tables = .{},
 };
 
 // ---------------------------------------------------------------------------
@@ -526,7 +528,11 @@ pub fn buildGraphics(arena: std.mem.Allocator, c: Ctx, live: GpuLive) report.Pag
                 b.add(.{ .label = l, .value = "—", .state = .unavailable, .confidence = .unknown, .source = why });
             }
         }
-        links.gpuScoped(&b, g.vendor, if (board) |n| n else g.name, b.dup(g.name));
+        var gm: [128]u8 = undefined;
+        var gp: [16]u8 = undefined;
+        const gmodel = lookup.normalizeGpu(&gm, g.name);
+        const gpci = std.fmt.bufPrint(&gp, "{x:0>4}:{x:0>4}", .{ g.vendor, g.device }) catch "";
+        links.gpuScoped(&b, g.vendor, if (board) |n| n else g.name, b.dup(g.name), lookup.resolve(c.lookup, .gpu, gmodel, gpci));
     }
     if (first) page.headline = "Brak sprzętowej karty graficznej";
     return page;

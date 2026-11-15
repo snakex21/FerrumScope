@@ -24,6 +24,8 @@ const snapshot = ferrum.sys.snapshot;
 const pages_cpu = ferrum.sys.pages_cpu;
 const pages_system = ferrum.sys.pages_system;
 const gv = @import("sys/win/gpu_vendor.zig");
+const lookup = ferrum.sys.lookup;
+const links_embedded = @import("links_embedded");
 const msr = ferrum.telemetry.msr;
 const metrics = ferrum.telemetry.metrics;
 const catalog = ferrum.telemetry.catalog;
@@ -63,6 +65,8 @@ pub const State = struct {
     gpa: std.mem.Allocator,
     opts: Options,
     snap_arena: std.heap.ArenaAllocator,
+    links_arena: std.heap.ArenaAllocator,
+    links: lookup.Tables = .{},
     page_arena: std.heap.ArenaAllocator,
     snap: snapshot.Snapshot = .{},
 
@@ -91,7 +95,9 @@ pub const State = struct {
             .opts = opts,
             .snap_arena = std.heap.ArenaAllocator.init(gpa),
             .page_arena = std.heap.ArenaAllocator.init(gpa),
+            .links_arena = std.heap.ArenaAllocator.init(gpa),
         };
+        s.loadLinks();
         s.loadCpu();
         s.loadSnapshot();
         // Backend MSR musi istnieć zawsze — strona Czujniki pyta o zdolności.
@@ -110,6 +116,7 @@ pub const State = struct {
         }
         self.snap_arena.deinit();
         self.page_arena.deinit();
+        self.links_arena.deinit();
         self.gpa.destroy(self);
     }
 
@@ -263,6 +270,39 @@ pub const State = struct {
         return lv;
     }
 
+    // --- linki TechPowerUp ----------------------------------------------------
+
+    /// Ścieżka `data\links.toml` obok programu (UTF-8, w `buf`).
+    pub fn userLinksPath(buf: []u8) ?[]const u8 {
+        var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const dir = std.fs.selfExeDirPath(&dir_buf) catch return null;
+        return std.fmt.bufPrint(buf, "{s}{c}data{c}links.toml", .{ dir, std.fs.path.sep, std.fs.path.sep }) catch null;
+    }
+
+    /// Tabela kuratorowana (osadzona) + linki przypięte przez użytkownika.
+    pub fn loadLinks(self: *State) void {
+        _ = self.links_arena.reset(.free_all);
+        const a = self.links_arena.allocator();
+        self.links.curated = lookup.parse(a, links_embedded.text) catch &.{};
+        self.links.user = &.{};
+        var pb: [std.fs.max_path_bytes]u8 = undefined;
+        const path = userLinksPath(&pb) orelse return;
+        const text = std.fs.cwd().readFileAlloc(a, path, 256 * 1024) catch return;
+        self.links.user = lookup.parse(a, text) catch &.{};
+    }
+
+    /// Przypina dokładny link dla modelu (zapis do `data\links.toml`).
+    pub fn pinLink(self: *State, kind: lookup.Kind, model_key: []const u8, pci: []const u8, url: []const u8) !void {
+        if (!lookup.validUrl(url) or model_key.len == 0) return error.InvalidUrl;
+        var pb: [std.fs.max_path_bytes]u8 = undefined;
+        const path = userLinksPath(&pb) orelse return error.NoPath;
+        if (std.fs.path.dirname(path)) |d| std.fs.cwd().makePath(d) catch {};
+        const text = try lookup.withPinned(self.gpa, self.links.user, .{ .kind = kind, .model = model_key, .pci = pci, .url = url, .source = "user" });
+        defer self.gpa.free(text);
+        try std.fs.cwd().writeFile(.{ .sub_path = path, .data = text });
+        self.loadLinks();
+    }
+
     /// Zegar zewnętrzny CPU z SMBIOS typ 4 (do „Zegar magistrali” i mnożnika).
     fn busMhz(self: *State) ?u32 {
         const buf = self.snap.smbios orelse return null;
@@ -291,6 +331,7 @@ pub const State = struct {
             .origin = self.cpu_origin,
             .live = self.liveCpu(),
             .bus_mhz = self.busMhz(),
+            .lookup = self.links,
         });
     }
 
@@ -338,7 +379,7 @@ pub const State = struct {
     pub fn buildPages(self: *State) []report.Page {
         _ = self.page_arena.reset(.retain_capacity);
         const a = self.page_arena.allocator();
-        const ctx: pages_system.Ctx = .{ .snap = &self.snap, .pci = pci_embedded.get() };
+        const ctx: pages_system.Ctx = .{ .snap = &self.snap, .pci = pci_embedded.get(), .lookup = self.links };
         const live = self.gpuLive(a);
         const pages = a.alloc(report.Page, 6) catch return &.{};
         pages[0] = self.cpuPage(a);

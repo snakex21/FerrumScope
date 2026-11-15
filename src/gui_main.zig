@@ -47,6 +47,7 @@ const ID_SOURCES: u16 = 105;
 const ID_LISTVIEW: u16 = 106;
 const ID_SELECTOR0: u16 = 300; // + indeks zakładki
 const ID_CELLBTN0: u16 = 400; // + indeks komórki
+const ID_PINBTN0: u16 = 700; // + indeks komórki
 
 const n_tabs = forms.tabs.len;
 const max_cells = 256;
@@ -64,6 +65,7 @@ const CellCtl = struct {
     edit: ?w.HWND = null,
     mark: ?w.HWND = null,
     btn: ?w.HWND = null,
+    pin: ?w.HWND = null,
     tone: Tone = .normal,
     mark_tone: Tone = .normal,
 };
@@ -204,6 +206,7 @@ fn applyFonts() void {
     const f = app.font;
     for ([_]?w.HWND{ app.tab, app.lv, app.btn_refresh, app.chk_serials, app.chk_sources, app.chk_list }) |h| setFont(h, f);
     for (app.cells[0..app.n_cells]) |c| {
+        setFont(c.pin, f);
         setFont(c.lbl, f);
         setFont(c.edit, f);
         setFont(c.mark, f);
@@ -370,6 +373,9 @@ fn createForms() void {
                     var bb: [64]u16 = undefined;
                     cc.btn = createChild(L("BUTTON"), widen(&bb, c.button), 0, child | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_CELLBTN0 + @as(u16, @intCast(idx)));
                 }
+                if (c.pin) {
+                    cc.pin = createChild(L("BUTTON"), L("Przypnij…"), 0, child | w.WS_TABSTOP | w.BS_PUSHBUTTON, ID_PINBTN0 + @as(u16, @intCast(idx)));
+                }
                 app.cells[idx] = cc;
                 app.n_cells += 1;
                 addTip(cc.edit);
@@ -434,6 +440,7 @@ const M = struct {
     const cell_gap: i32 = 10;
     const mark_w: i32 = 14;
     const btn_w: i32 = 76;
+    const pin_w: i32 = 70;
     const sel_h: i32 = 28;
 };
 
@@ -494,13 +501,15 @@ fn layoutForm(t: usize, area: w.RECT) void {
                     const cx = inner_x + @as(i32, @intCast(k2)) * (cw + px(M.cell_gap));
                     const lw = px(if (c.label_w > 0) c.label_w else if (k2 == 0) g.label_w else 56);
                     const mw: i32 = if (app.show_sources) px(M.mark_w) else 0;
-                    const bw: i32 = if (cc.btn != null) px(M.btn_w) + px(4) else 0;
+                    const pw: i32 = if (cc.pin != null) px(M.pin_w) + px(4) else 0;
+                    const bw: i32 = (if (cc.btn != null) px(M.btn_w) + px(4) else 0) + pw;
                     const eh = px(M.edit_h) + px(M.line_h) * (@as(i32, c.lines) - 1);
                     move(cc.lbl, cx, ry + px(3), lw - px(4), px(18));
                     move(cc.edit, cx + lw, ry, @max(px(20), cw - lw - mw - bw), eh);
                     move(cc.mark, cx + cw - mw - bw + px(3), ry + px(3), mw, px(18));
                     show(cc.mark, app.show_sources and t == app.current and !app.list_mode);
                     if (cc.btn) |b| move(b, cx + cw - bw + px(4), ry - px(1), px(M.btn_w), px(M.edit_h) + px(2));
+                    if (cc.pin) |b| move(b, cx + cw - pw + px(4), ry - px(1), px(M.pin_w), px(M.edit_h) + px(2));
                 }
                 ry += rowHeight(row);
             }
@@ -772,6 +781,7 @@ fn updateVisibility() void {
         show(c.edit, vis);
         show(c.mark, vis and app.show_sources);
         show(c.btn, vis);
+        show(c.pin, vis);
     }
     for (app.groups[0..app.n_groups]) |g| show(g.hwnd, !list and g.tab == t);
     for (app.extras[0..app.n_extras]) |e| show(e.hwnd, e.tab == t);
@@ -1004,7 +1014,9 @@ fn wndProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.win
                     layout();
                 },
                 ID_LISTVIEW => setListMode(checked(app.chk_list)),
-                else => if (id >= ID_CELLBTN0 and id < ID_CELLBTN0 + max_cells) {
+                else => if (id >= ID_PINBTN0 and id < ID_PINBTN0 + max_cells) {
+                    pinFromClipboard(&app.cells[id - ID_PINBTN0]);
+                } else if (id >= ID_CELLBTN0 and id < ID_CELLBTN0 + max_cells) {
                     const c = &app.cells[id - ID_CELLBTN0];
                     if (cellLink(c)) |l| openUrl(l.url);
                 },
@@ -1492,4 +1504,61 @@ fn badgeTip(bv: *const BadgeView) [*:0]const u16 {
     var b: [512]u8 = undefined;
     const s = std.fmt.bufPrint(&b, "{s}\nKliknij: wyszukaj w bazie TechPowerUp (otwiera przeglądarkę).", .{bv.src_buf[0..bv.src_len]}) catch "";
     return widen(&tip_buf, s);
+}
+
+// ---------------------------------------------------------------------------
+// „Przypnij link”: dokładna strona TechPowerUp ze schowka → data\links.toml
+// ---------------------------------------------------------------------------
+
+const lookup = ferrum.sys.lookup;
+extern "user32" fn OpenClipboard(?w.HWND) callconv(.winapi) w.BOOL;
+extern "user32" fn CloseClipboard() callconv(.winapi) w.BOOL;
+extern "user32" fn GetClipboardData(u32) callconv(.winapi) ?*anyopaque;
+extern "kernel32" fn GlobalLock(?*anyopaque) callconv(.winapi) ?[*:0]const u16;
+extern "kernel32" fn GlobalUnlock(?*anyopaque) callconv(.winapi) w.BOOL;
+
+fn clipboardText(buf: []u8) []const u8 {
+    if (OpenClipboard(app.hwnd) == 0) return "";
+    defer _ = CloseClipboard();
+    const h = GetClipboardData(13) orelse return ""; // CF_UNICODETEXT
+    const p = GlobalLock(h) orelse return "";
+    defer _ = GlobalUnlock(h);
+    const s = std.mem.span(p);
+    const n = std.unicode.utf16LeToUtf8(buf, s[0..@min(s.len, buf.len / 3)]) catch return "";
+    return std.mem.trim(u8, buf[0..n], " \t\r\n");
+}
+
+fn pinFromClipboard(c: *const CellCtl) void {
+    const st = app.state orelse return;
+    const p = pageOfTab(c.tab) orelse return;
+    const gpu = std.mem.eql(u8, forms.tabs[c.tab].id, "graphics");
+    const idx = app.sel_index[c.tab];
+    var mb: [128]u8 = undefined;
+    var model_key: []const u8 = "";
+    var pci: []const u8 = "";
+    var pb: [16]u8 = undefined;
+    if (gpu) {
+        model_key = lookup.normalizeGpu(&mb, badgeField(p, "@GPU: ", "Nazwa (sterownik)", idx));
+        const id = badgeField(p, "@GPU: ", "Identyfikator", idx);
+        if (id.len == 9) pci = std.ascii.lowerString(&pb, id);
+    } else {
+        model_key = lookup.normalizeCpu(&mb, badgeField(p, "Procesor", "Brand string", 0));
+    }
+    var cb: [2048]u8 = undefined;
+    const url = clipboardText(&cb);
+    var msg_b: [1500]u8 = undefined;
+    var wb: [1600]u16 = undefined;
+    if (!lookup.validUrl(url)) {
+        const msg = std.fmt.bufPrint(&msg_b, "Skopiuj do schowka adres strony tego modelu (https, techpowerup.com albo strona producenta), np. z paska przeglądarki, i kliknij „Przypnij…” ponownie.\n\nModel: {s}", .{model_key}) catch "";
+        _ = w.MessageBoxW(app.hwnd, widen(&wb, msg), L("FerrumScope — przypnij link"), w.MB_OK | w.MB_ICONINFORMATION);
+        return;
+    }
+    const msg = std.fmt.bufPrint(&msg_b, "Przypiąć ten adres dla „{s}”?\n\n{s}\n\nZapis: data\\links.toml obok programu (ma pierwszeństwo przed wbudowaną tabelą).", .{ model_key, url }) catch "";
+    const MB_YESNO: u32 = 0x4;
+    if (w.MessageBoxW(app.hwnd, widen(&wb, msg), L("FerrumScope — przypnij link"), MB_YESNO | w.MB_ICONINFORMATION) != 6) return;
+    st.pinLink(if (gpu) .gpu else .cpu, model_key, pci, url) catch {
+        _ = w.MessageBoxW(app.hwnd, L("Nie udało się zapisać data\\links.toml."), L("FerrumScope"), w.MB_OK | w.MB_ICONWARNING);
+        return;
+    };
+    refreshCurrent(true);
 }

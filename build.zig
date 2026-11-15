@@ -146,6 +146,15 @@ pub fn build(b: *std.Build) void {
     logos_src.appendSlice(b.allocator, "};\n") catch @panic("OOM");
     const logos_mod = logos_files.add("logos_embedded.zig", logos_src.items);
 
+    // --- 2c. kuratorowana tabela linków TechPowerUp (wpisy ręczne) -------------
+    const links_files = b.addWriteFiles();
+    _ = links_files.addCopyFile(b.path("db/source/links/techpowerup.toml"), "techpowerup.toml");
+    const links_mod = links_files.add("links_embedded.zig",
+        \\// Plik generowany przez build.zig. Nie edytuj ręcznie.
+        \\pub const text = @embedFile("techpowerup.toml");
+        \\
+    );
+
     // --- 3. CLI --------------------------------------------------------------
     const cli_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -155,6 +164,7 @@ pub fn build(b: *std.Build) void {
     cli_mod.addAnonymousImport("hwdb_embedded", .{ .root_source_file = hwdb_mod_path });
     cli_mod.addAnonymousImport("fixtures_embedded", .{ .root_source_file = fixtures_mod });
     cli_mod.addAnonymousImport("pciids_embedded", .{ .root_source_file = pciids_mod_path });
+    cli_mod.addAnonymousImport("links_embedded", .{ .root_source_file = links_mod });
 
     const cli = b.addExecutable(.{
         .name = "ferrumscope",
@@ -181,6 +191,7 @@ pub fn build(b: *std.Build) void {
         gui_mod.addAnonymousImport("hwdb_embedded", .{ .root_source_file = hwdb_mod_path });
         gui_mod.addAnonymousImport("pciids_embedded", .{ .root_source_file = pciids_mod_path });
         gui_mod.addAnonymousImport("logos_embedded", .{ .root_source_file = logos_mod });
+        gui_mod.addAnonymousImport("links_embedded", .{ .root_source_file = links_mod });
 
         const gui = b.addExecutable(.{
             .name = "ferrumscope-gui",
@@ -227,6 +238,7 @@ pub fn build(b: *std.Build) void {
     lib_tests.root_module.addAnonymousImport("fixtures_embedded", .{ .root_source_file = fixtures_mod });
     lib_tests.root_module.addAnonymousImport("pciids_embedded", .{ .root_source_file = pciids_mod_path });
     lib_tests.root_module.addAnonymousImport("logos_embedded", .{ .root_source_file = logos_mod });
+    lib_tests.root_module.addAnonymousImport("links_embedded", .{ .root_source_file = links_mod });
     const run_lib_tests = b.addRunArtifact(lib_tests);
     test_step.dependOn(&run_lib_tests.step);
 
