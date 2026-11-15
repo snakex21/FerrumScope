@@ -11,7 +11,8 @@ set "VCTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\A
 set "KITSROOT=C:\Program Files (x86)\Windows Kits\10"
 set "KDKVER=10.0.26100.0"
 set "HERE=%~dp0"
-set "OUT=%HERE%build"
+REM Katalog wynikowy mozna nadpisac: set FERRUM_DRIVER_OUT=... (np. katalog tymczasowy).
+if defined FERRUM_DRIVER_OUT (set "OUT=%FERRUM_DRIVER_OUT%") else (set "OUT=%HERE%build")
 
 if not exist "%OUT%" mkdir "%OUT%"
 
@@ -77,7 +78,7 @@ link /nologo /driver /subsystem:native /entry:DriverEntry /machine:x64 ^
    /libpath:"%KITSROOT%\Lib\%KDKVER%\km\x64" ^
    /libpath:"%KITSROOT%\Lib\%KDKVER%\um\x64" ^
    "%OUT%\ferrum_msr.obj" ^
-   ntoskrnl.lib hal.lib wmilib.lib BufferOverflowK.lib
+   ntoskrnl.lib hal.lib wmilib.lib wdmsec.lib BufferOverflowK.lib
 if errorlevel 1 (
     echo BUILDFAIL: link
     exit /b 1

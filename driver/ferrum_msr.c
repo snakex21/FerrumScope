@@ -57,13 +57,30 @@
  * ---------------------------------------------------------------------------
  * PROCESSOR GROUPS
  * ---------------------------------------------------------------------------
- * Numeracja logiczna w Windows to `grupa * MaxPerGroup + indeks`. Nie używamy
- * na ślepo `% 64` — `KeGetMaximumProcessorNumberPerGroup()` zwraca wartość
- * faktyczną dla danego systemu. Walidujemy: grupa istnieje, indeks w grupie
- * istnieje, procesor jest aktywny (nie offline).
+ * Indeks logiczny CPU z protokołu to SYSTEMOWY indeks procesora (0..N-1).
+ * Mapowanie na (grupa, numer w grupie) robi jądro: `KeGetProcessorNumberFromIndex`.
+ * Nie liczymy `indeks / 64` — grupy nie muszą być pełne. Po ustawieniu
+ * powinowactwa migracja jest dodatkowo potwierdzana (KROK 3).
  */
 
 #include <ntddk.h>
+#include <wdmsec.h>   /* IoCreateDeviceSecure — link: wdmsec.lib */
+#include <initguid.h> /* DEFINE_GUID emituje definicję, nie tylko deklarację */
+
+/*
+ * Klasa urządzenia dla IoCreateDeviceSecure. Własny GUID: SDDL podany przy
+ * tworzeniu staje się domyślnym deskryptorem klasy, a administrator może go
+ * nadpisać w rejestrze klasy — dlatego nie współdzielimy klasy z nikim.
+ */
+DEFINE_GUID(GUID_DEVCLASS_FERRUMSCOPE_MSR,
+    0x5c0b6f3e, 0x8d0a, 0x4e47, 0x9a, 0x61, 0x2f, 0x3b, 0x1c, 0x7e, 0x45, 0xd2);
+
+/*
+ * Tylko SYSTEM i wbudowani Administratorzy (pełny dostęp); nikt inny nie
+ * otworzy urządzenia. `D:P` = chroniony DACL (bez dziedziczenia ACE).
+ * Zgodne z docs/SECURITY-MODEL.md §7.
+ */
+#define FERRUM_DEVICE_SDDL L"D:P(A;;GA;;;SY)(A;;GA;;;BA)"
 
 /*
  * ---------------------------------------------------------------------------
@@ -93,18 +110,10 @@
  */
 
 /*
- * Procesorów w grupie. Jądro udostępnia `KeGetMaximumProcessorNumberPerGroup()`,
- * ale ten WDK go nie deklaruje ani nie eksportuje. Wartość 64 to **nie jest
- * założenie przypadkowe**: to wartość architektoniczna grupy procesorów na
- * każdej wydanej wersji Windows.
- *
- * Bezpieczeństwa NIE daje ta stała, tylko **potwierdzenie rzeczywistego
- * procesora** po ustawieniu powinowactwa (patrz niżej). Gdyby mapa
- * group/indeks była zła, wątek nie potwierdziłby migracji i zwrócił
- * CPU_OFFLINE — zamiast czytać rejestr niewłaściwego rdzenia. Stała jest
- * więc wejściem, a nie zabezpieczeniem.
+ * KeGetProcessorNumberFromIndex jest zadeklarowane w wdm.h (NTDDI >= WIN7)
+ * i eksportowane przez ntoskrnl od Windows 7 — zastępuje ręczną arytmetykę
+ * grup, która wcześniej zakładała stałe 64 procesory na grupę.
  */
-#define FERRUM_PROCESSORS_PER_GROUP 64u
 
 /* ------------------------------------------------------------------ */
 /* Protokół — musi odpowiadać src/telemetry/driver_proto.zig         */
@@ -233,10 +242,8 @@ FerrumReadMsrOnCpu(UINT16 LogicalCpu, UINT32 MsrIndex, UINT64 *OutValue)
     GROUP_AFFINITY Target;
     GROUP_AFFINITY Previous;
     PROCESSOR_NUMBER ProcNum;
-    ULONG MaxPerGroup;
-    ULONG GroupActive;
-    ULONG Group;
-    ULONG IndexInGroup;
+    PROCESSOR_NUMBER TargetNum;
+    NTSTATUS MapStatus;
     ULONG CurrentIndex;
     UINT64 Value;
     FERRUM_STATUS Status;
@@ -256,32 +263,25 @@ FerrumReadMsrOnCpu(UINT16 LogicalCpu, UINT32 MsrIndex, UINT64 *OutValue)
         return FERRUM_READ_FAILED;
     }
 
-    MaxPerGroup = FERRUM_PROCESSORS_PER_GROUP;
-    if (MaxPerGroup == 0) {
-        return FERRUM_READ_FAILED;
-    }
-
-    /* Numeracja logiczna: grupa * MaxPerGroup + indeks w grupie. */
-    Group        = (ULONG)LogicalCpu / MaxPerGroup;
-    IndexInGroup = (ULONG)LogicalCpu % MaxPerGroup;
-
     /*
-     * Grupa musi istnieć i mieć aktywne procesory.
-     * `KeQueryActiveProcessorCountEx(grupa)` zwraca 0 dla grupy nieistniejącej
-     * lub w pełni offline — obie sytuacje kończą się tak samo i obie są
-     * powodem do odmowy, nigdy do odczytu.
+     * Indeks systemowy -> (grupa, numer w grupie) liczy JĄDRO przez
+     * `KeGetProcessorNumberFromIndex`. Grupy nie muszą być pełne (np. 2 x 36
+     * zamiast 64 + 8), więc arytmetyka `indeks / 64` wskazałaby zły procesor.
+     * Funkcja zwraca STATUS_INVALID_PARAMETER dla indeksu, którego nie ma,
+     * a potwierdzenie migracji (KROK 3) i tak weryfikuje wynik.
      */
-    GroupActive = (ULONG)KeQueryActiveProcessorCountEx((USHORT)Group);
-    if (GroupActive == 0) {
+    RtlZeroMemory(&TargetNum, sizeof(TargetNum));
+    MapStatus = KeGetProcessorNumberFromIndex((ULONG)LogicalCpu, &TargetNum);
+    if (!NT_SUCCESS(MapStatus)) {
         return FERRUM_INVALID_CPU;
     }
-    if (IndexInGroup >= GroupActive) {
+    if (TargetNum.Number >= (sizeof(KAFFINITY) * 8)) {
         return FERRUM_INVALID_CPU;
     }
 
     RtlZeroMemory(&Target, sizeof(Target));
-    Target.Group = (USHORT)Group;
-    Target.Mask  = ((KAFFINITY)1) << IndexInGroup;
+    Target.Group = TargetNum.Group;
+    Target.Mask  = ((KAFFINITY)1) << TargetNum.Number;
     Target.Reserved[0] = 0;
     Target.Reserved[1] = 0;
     Target.Reserved[2] = 0;
@@ -565,15 +565,22 @@ FerrumDriverUnload(PDRIVER_OBJECT DriverObject)
 {
     UNICODE_STRING SymLink;
 
-    UNREFERENCED_PARAMETER(DriverObject);
     RtlInitUnicodeString(&SymLink, L"\\DosDevices\\FerrumScopeMsr");
     IoDeleteSymbolicLink(&SymLink);
+    /*
+     * Usuwamy obiekt urządzenia. Bez tego po wyładowaniu zostaje osierocony
+     * \Device\FerrumScopeMsr, a ponowne załadowanie kończy się
+     * STATUS_OBJECT_NAME_COLLISION w IoCreateDeviceSecure.
+     */
+    if (DriverObject->DeviceObject != NULL) {
+        IoDeleteDevice(DriverObject->DeviceObject);
+    }
 }
 
 NTSTATUS
 DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
-    UNICODE_STRING DevName, SymLink;
+    UNICODE_STRING DevName, SymLink, Sddl;
     PDEVICE_OBJECT DeviceObject = NULL;
     NTSTATUS Status;
     ULONG i;
@@ -597,8 +604,18 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
     RtlInitUnicodeString(&DevName, L"\\Device\\FerrumScopeMsr");
     RtlInitUnicodeString(&SymLink, L"\\DosDevices\\FerrumScopeMsr");
 
-    Status = IoCreateDevice(DriverObject, 0, &DevName, FILE_DEVICE_UNKNOWN,
-                            FILE_DEVICE_SECURE_OPEN, FALSE, &DeviceObject);
+    RtlInitUnicodeString(&Sddl, FERRUM_DEVICE_SDDL);
+
+    /*
+     * IoCreateDeviceSecure zamiast IoCreateDevice: deskryptor bezpieczeństwa
+     * jest ustawiany atomowo przy tworzeniu (tylko SYSTEM + Administratorzy),
+     * a nie brany z domyślnego, który mógłby dopuścić zwykłych użytkowników.
+     * FILE_DEVICE_SECURE_OPEN: ten sam DACL obowiązuje przy otwarciu z dowolną
+     * ścieżką pod nazwą urządzenia.
+     */
+    Status = IoCreateDeviceSecure(DriverObject, 0, &DevName, FILE_DEVICE_UNKNOWN,
+                                  FILE_DEVICE_SECURE_OPEN, FALSE, &Sddl,
+                                  &GUID_DEVCLASS_FERRUMSCOPE_MSR, &DeviceObject);
     if (!NT_SUCCESS(Status)) {
         return Status;
     }

@@ -82,6 +82,20 @@ obsługuje trzy znane kody, a `default` zwraca
 `STATUS_INVALID_DEVICE_REQUEST`. Nie ma operacji zapisu, nie ma funkcji, nie ma
 ścieżki — nie da się jej wywołać nawet błędem klienta.
 
+### 2.2 Poprawki z 2026-11-15 (skompilowane, nieuruchomione)
+
+* `DriverUnload` usuwa teraz obiekt urządzenia (`IoDeleteDevice`), nie tylko
+  dowiązanie symboliczne — wcześniej ponowne załadowanie skończyłoby się
+  kolizją nazwy.
+* Urządzenie powstaje przez `IoCreateDeviceSecure` z SDDL tylko dla SYSTEM
+  i Administratorów (§7).
+* Mapowanie indeksu CPU na grupę/numer robi `KeGetProcessorNumberFromIndex`
+  zamiast arytmetyki `indeks / 64` (grupy nie muszą być pełne).
+
+Kod skompilowano i zlinkowano (`driver/build_driver.bat`, MSVC 14.44 + WDK
+10.0.26100.0, `/W4` bez ostrzeżeń) do katalogu tymczasowego. Sterownik **nie**
+został podpisany, zainstalowany ani załadowany — status z §2.1 bez zmian.
+
 ## 3. Allowlist MSR, nie blocklist
 
 Odczyt jest dozwolony **tylko** dla rejestrów na liście. Blocklista byłaby
@@ -156,7 +170,11 @@ Dlatego `MsrError.cpu_offline` jest **osobnym** statusem, a nie podkategorią
 
 Sterownik jest urządzeniem systemowym. Domyślna polityka:
 
-* urządzenie tworzy się tylko dla administratorów, nie dla wszystkich sesji,
+* urządzenie tworzy się tylko dla administratorów, nie dla wszystkich sesji:
+  `IoCreateDeviceSecure` z SDDL `D:P(A;;GA;;;SY)(A;;GA;;;BA)` (SYSTEM i
+  Administratorzy, chroniony DACL) i własnym GUID klasy urządzenia
+  (`driver/ferrum_msr.c`, od 2026-11-15; wcześniej `IoCreateDevice` z domyślnym
+  deskryptorem — rozbieżność z tym dokumentem, teraz usunięta),
 * `FILE_READ_DATA` w kodach IOCTL — brak `FILE_WRITE_DATA` w całym protokole,
 * brak trybu „wszystko dozwolone dla debugowania". Jeśli kiedyś będzie potrzebny,
   ma być **jawnym** przełącznikiem budowania, nie ukrytą furtką.
