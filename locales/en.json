@@ -813,5 +813,9 @@
   },
   "Źródło: {source}": "Source: {source}",
   "Źródło: {source}\nPewność: {confidence} · stan: {state}": "Source: {source}\nConfidence: {confidence} · state: {state}",
-  "źródło:": "source:"
+  "źródło:": "source:",
+  "dokładna strona sterowników (przypięta przez użytkownika)": "exact driver page (pinned by the user)",
+  "dokładna strona sterowników (tabela kuratorowana)": "exact driver page (curated table)",
+  "strona sterowników wyprowadzona z wykrytego modelu": "driver page derived from the detected model",
+  "ogólna strona sterowników producenta": "vendor's general driver page"
 }

@@ -156,9 +156,11 @@ pub fn build(b: *std.Build) void {
     // --- 2c. kuratorowana tabela linków TechPowerUp (wpisy ręczne) -------------
     const links_files = b.addWriteFiles();
     _ = links_files.addCopyFile(b.path("db/source/links/techpowerup.toml"), "techpowerup.toml");
+    _ = links_files.addCopyFile(b.path("db/source/links/drivers.toml"), "drivers.toml");
     const links_mod = links_files.add("links_embedded.zig",
         \\// Plik generowany przez build.zig. Nie edytuj ręcznie.
         \\pub const text = @embedFile("techpowerup.toml");
+        \\pub const drivers_text = @embedFile("drivers.toml");
         \\
     );
 

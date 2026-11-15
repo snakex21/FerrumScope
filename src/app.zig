@@ -68,6 +68,7 @@ pub const State = struct {
     snap_arena: std.heap.ArenaAllocator,
     links_arena: std.heap.ArenaAllocator,
     links: lookup.Tables = .{},
+    driver_links: ferrum.sys.drivers.Tables = .{},
     page_arena: std.heap.ArenaAllocator,
     snap: snapshot.Snapshot = .{},
 
@@ -284,11 +285,28 @@ pub const State = struct {
         return std.fmt.bufPrint(buf, "{s}{c}data{c}links.toml", .{ dir, std.fs.path.sep, std.fs.path.sep }) catch null;
     }
 
+    /// `data\\driver_links.toml` obok programu (strony sterowników przypięte przez użytkownika).
+    pub fn driverLinksPath(buf: []u8) ?[]const u8 {
+        var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const dir = std.fs.selfExeDirPath(&dir_buf) catch return null;
+        return std.fmt.bufPrint(buf, "{s}{c}data{c}driver_links.toml", .{ dir, std.fs.path.sep, std.fs.path.sep }) catch null;
+    }
+
     /// Tabela kuratorowana (osadzona) + linki przypięte przez użytkownika.
     pub fn loadLinks(self: *State) void {
         _ = self.links_arena.reset(.free_all);
         const a = self.links_arena.allocator();
         self.links.curated = lookup.parse(a, links_embedded.text) catch &.{};
+        self.driver_links.curated = ferrum.sys.drivers.parse(a, links_embedded.drivers_text) catch &.{};
+        self.driver_links.user = &.{};
+        {
+            var dpb: [std.fs.max_path_bytes]u8 = undefined;
+            if (driverLinksPath(&dpb)) |dp| {
+                if (std.fs.cwd().readFileAlloc(a, dp, 256 * 1024)) |dt| {
+                    self.driver_links.user = ferrum.sys.drivers.parse(a, dt) catch &.{};
+                } else |_| {}
+            }
+        }
         self.links.user = &.{};
         var pb: [std.fs.max_path_bytes]u8 = undefined;
         const path = userLinksPath(&pb) orelse return;
@@ -388,7 +406,7 @@ pub const State = struct {
     pub fn buildPages(self: *State) []report.Page {
         _ = self.page_arena.reset(.retain_capacity);
         const a = self.page_arena.allocator();
-        const ctx: pages_system.Ctx = .{ .snap = &self.snap, .pci = pci_embedded.get(), .lookup = self.links };
+        const ctx: pages_system.Ctx = .{ .snap = &self.snap, .pci = pci_embedded.get(), .lookup = self.links, .drivers = self.driver_links };
         const live = self.gpuLive(a);
         const pages = a.alloc(report.Page, 6) catch return &.{};
         pages[0] = self.cpuPage(a);

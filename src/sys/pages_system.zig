@@ -18,6 +18,7 @@ const sp = @import("storage_parse.zig");
 const gv = @import("win/gpu_vendor.zig");
 const links = @import("links.zig");
 const lookup = @import("lookup.zig");
+const drivers = @import("drivers.zig");
 const i18n = @import("../i18n/i18n.zig");
 
 const Builder = report.Builder;
@@ -27,6 +28,7 @@ pub const Ctx = struct {
     snap: *const snap.Snapshot,
     pci: ?*const pciids.Db = null,
     lookup: lookup.Tables = .{},
+    drivers: drivers.Tables = .{},
 };
 
 // ---------------------------------------------------------------------------
@@ -185,6 +187,22 @@ pub fn detectChipset(b: *Builder, c: Ctx) ?Chipset {
     return null;
 }
 
+/// Podmienia adres odnośnika sterowników (klucz `key`, zakres `scope`) na
+/// rozwiązany przez `drivers.zig` i dopisuje jego pochodzenie.
+fn driverOverride(b: *Builder, key: []const u8, scope: []const u8, r: drivers.Resolved) void {
+    for (b.page.links.items) |*l| {
+        if (!std.mem.eql(u8, l.key, key)) continue;
+        if (scope.len > 0 and l.scope.len > 0 and !std.mem.eql(u8, l.scope, scope)) continue;
+        l.url = b.dup(r.url);
+        l.note = switch (r.origin) {
+            .user => b.t("dokładna strona sterowników (przypięta przez użytkownika)"),
+            .curated => b.t("dokładna strona sterowników (tabela kuratorowana)"),
+            .derived => b.t("strona sterowników wyprowadzona z wykrytego modelu"),
+            .generic => b.t("ogólna strona sterowników producenta"),
+        };
+    }
+}
+
 pub fn buildBoard(arena: std.mem.Allocator, c: Ctx) report.Page {
     var page: report.Page = .{ .id = "board", .title = "" };
     var b = Builder.init(arena, &page);
@@ -248,6 +266,9 @@ pub fn buildBoard(arena: std.mem.Allocator, c: Ctx) report.Page {
     if (detectChipset(&b, c)) |cs| {
         b.add(.{ .label = b.t("Chipset"), .value = cs.name, .raw = b.fmt("{X:0>4}:{X:0>4} rev {X:0>2}", .{ cs.device.vendor, cs.device.device, cs.device.revision }), .source = cs.method, .confidence = cs.confidence });
         links.chipset(&b, cs.vendor);
+        // Dokładna strona sterowników chipsetu: przypięta → tabela → wyprowadzona → ogólna.
+        const product = if (board) |bb| (if (bb.product) |f| f.text() orelse "" else "") else "";
+        driverOverride(&b, "chipset_drivers", "", drivers.chipset(b.arena.alloc(u8, 256) catch &.{}, c.drivers, cs.vendor, product));
     } else {
         b.add(.{ .label = b.t("Chipset"), .value = "—", .state = .unavailable, .confidence = .unknown, .source = if (c.snap.pci.len == 0) b.t("brak listy urządzeń PCI") else b.t("nie rozpoznano z pci.ids") });
     }
@@ -548,6 +569,7 @@ pub fn buildGraphics(arena: std.mem.Allocator, c: Ctx, live: GpuLive) report.Pag
         const gmodel = lookup.normalizeGpu(&gm, g.name);
         const gpci = std.fmt.bufPrint(&gp, "{x:0>4}:{x:0>4}", .{ g.vendor, g.device }) catch "";
         links.gpuScoped(&b, g.vendor, if (board) |n| n else g.name, b.dup(g.name), lookup.resolve(c.lookup, .gpu, gmodel, gpci));
+        driverOverride(&b, "drivers", g.name, drivers.gpu(b.arena.alloc(u8, 256) catch &.{}, c.drivers, g.vendor, g.name, gmodel));
     }
     if (first) page.headline = b.t("Brak sprzętowej karty graficznej");
     return page;

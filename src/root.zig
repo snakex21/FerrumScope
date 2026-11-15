@@ -82,6 +82,7 @@ pub const sys = struct {
     pub const storage_parse = @import("sys/storage_parse.zig");
     pub const links = @import("sys/links.zig");
     pub const lookup = @import("sys/lookup.zig");
+    pub const drivers = @import("sys/drivers.zig");
     pub const pages_cpu = @import("sys/pages_cpu.zig");
     pub const pages_system = @import("sys/pages_system.zig");
     pub const win = if (builtin.os.tag == .windows) struct {
