@@ -45,6 +45,29 @@ pub fn build(b: *std.Build) void {
     run_hwdb.addArg("-o");
     const hwdb_mod_path = run_hwdb.addOutputFileArg("ferrum-hwdb.zig");
 
+    // --- 1b. kompilator bazy PCI ID ------------------------------------------
+    // `db/source/pci/pci.ids` (PCI ID Repository, GPL-2.0+ LUB BSD-3) jest
+    // kompilowany do zwartego obrazu binarnego osadzanego w programie.
+    const pciids_format_mod = b.createModule(.{
+        .root_source_file = b.path("src/sys/pciids_format.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const pciids_compile_mod = b.createModule(.{
+        .root_source_file = b.path("tools/pciids_compile.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    pciids_compile_mod.addImport("pciids_format", pciids_format_mod);
+    const pciids_exe = b.addExecutable(.{ .name = "pciids-compile", .root_module = pciids_compile_mod });
+    const run_pciids = b.addRunArtifact(pciids_exe);
+    run_pciids.addFileArg(b.path("db/source/pci/pci.ids"));
+    run_pciids.addArg("-o");
+    const pciids_mod_path = run_pciids.addOutputFileArg("ferrum-pciids.zig");
+    // Obraz binarny obok .zig (ten sam katalog cache) — wymóg @embedFile.
+    run_pciids.addArg("--bin");
+    _ = run_pciids.addOutputFileArg("ferrum-pciids.bin");
+
     // --- 2. pliki capture dla testów regresyjnych --------------------------
     const generated = b.addWriteFiles();
     const fixture_names = [_][]const u8{
@@ -77,6 +100,8 @@ pub fn build(b: *std.Build) void {
             b.fmt("{s}.cpuimg", .{n}),
         );
     }
+    // Capture systemowy (SMBIOS/PCI/GPU/dyski) z zamaskowanymi numerami seryjnymi.
+    _ = generated.addCopyFile(b.path("db/fixtures/sys/asrock_b550_5800x3d_rx7900xtx.sysimg"), "sys_asrock_b550.sysimg");
     const fixtures_mod = generated.add("fixtures_embedded.zig",
         \\// Plik generowany przez build.zig. Nie edytuj ręcznie.
         \\pub const intel_core2_e6600 = @embedFile("intel_core2_e6600.cpuimg");
@@ -91,6 +116,7 @@ pub fn build(b: *std.Build) void {
         \\pub const intel_leaf1f = @embedFile("intel_leaf1f.cpuimg");
         \\pub const intel_hybrid_12900k = @embedFile("intel_hybrid_12900k.cpuimg");
         \\pub const intel_2xsocket_8core = @embedFile("intel_2xsocket_8core.cpuimg");
+        \\pub const sys_asrock_b550 = @embedFile("sys_asrock_b550.sysimg");
     );
 
     // --- 3. CLI --------------------------------------------------------------
@@ -101,6 +127,7 @@ pub fn build(b: *std.Build) void {
     });
     cli_mod.addAnonymousImport("hwdb_embedded", .{ .root_source_file = hwdb_mod_path });
     cli_mod.addAnonymousImport("fixtures_embedded", .{ .root_source_file = fixtures_mod });
+    cli_mod.addAnonymousImport("pciids_embedded", .{ .root_source_file = pciids_mod_path });
 
     const cli = b.addExecutable(.{
         .name = "ferrumscope",
@@ -125,6 +152,7 @@ pub fn build(b: *std.Build) void {
         // Ta sama osadzona baza co CLI. `fixtures_embedded` GUI nie potrzebuje —
         // to wyłącznie dane testów.
         gui_mod.addAnonymousImport("hwdb_embedded", .{ .root_source_file = hwdb_mod_path });
+        gui_mod.addAnonymousImport("pciids_embedded", .{ .root_source_file = pciids_mod_path });
 
         const gui = b.addExecutable(.{
             .name = "ferrumscope-gui",
@@ -157,6 +185,7 @@ pub fn build(b: *std.Build) void {
     // plik niż program produkcyjny.
     lib_tests.root_module.addAnonymousImport("hwdb_embedded", .{ .root_source_file = hwdb_mod_path });
     lib_tests.root_module.addAnonymousImport("fixtures_embedded", .{ .root_source_file = fixtures_mod });
+    lib_tests.root_module.addAnonymousImport("pciids_embedded", .{ .root_source_file = pciids_mod_path });
     const run_lib_tests = b.addRunArtifact(lib_tests);
     test_step.dependOn(&run_lib_tests.step);
 
@@ -173,6 +202,16 @@ pub fn build(b: *std.Build) void {
     }));
     const hwdb_tests = b.addTest(.{ .name = "hwdb-compile-test", .root_module = hwdb_test_mod });
     test_step.dependOn(&b.addRunArtifact(hwdb_tests).step);
+
+    // Testy kompilatora PCI ID (parser pci.ids, serializacja, wiersz poleceń).
+    const pciids_test_mod = b.createModule(.{
+        .root_source_file = b.path("tools/pciids_compile.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    pciids_test_mod.addImport("pciids_format", pciids_format_mod);
+    const pciids_tests = b.addTest(.{ .name = "pciids-compile-test", .root_module = pciids_test_mod });
+    test_step.dependOn(&b.addRunArtifact(pciids_tests).step);
 
     // --- 5. walidacja bazy bez kompilacji programu ---------------------------
     b.step("hwdb-check", "Skompiluj i zwaliduj bazę").dependOn(&run_hwdb.step);

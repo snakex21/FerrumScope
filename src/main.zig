@@ -65,7 +65,7 @@ fn errw() *std.Io.Writer {
 
 // Literały `\\` w Zig to literały wieloliniowe — każda linia zawiera
 // znak nowej linii na końcu. Kontynuacja `"\` z C nie istnieje w Zig.
-const Usage = "ferrumscope " ++ version ++ " - identyfikacja sprzętu (Etap 1: CPU)\n" ++
+const Usage = "ferrumscope " ++ version ++ " - identyfikacja i diagnostyka sprzętu\n" ++
     \\
     \\Użycie:
     \\  ferrumscope cpu                 opis procesora
@@ -83,6 +83,19 @@ const Usage = "ferrumscope " ++ version ++ " - identyfikacja sprzętu (Etap 1: C
     \\  ferrumscope sensors --bench       koszt cyklu pollingu (fake/replay)
     \\  ferrumscope sensors --json        wynik w JSON
     \\  ferrumscope capture <plik>     zapisz surowy obraz CPUID do pliku .cpuimg
+    \\
+    \\Dane systemowe (bez sterownika):
+    \\  ferrumscope board | memory | gpu | storage | sensors-all
+    \\                                  jedna strona raportu (płyta, pamięć, grafika, dyski, czujniki)
+    \\  ferrumscope report [opcje]      pełny raport
+    \\      --format=txt|html|json      format (domyślnie txt)
+    \\      -o <plik>                   zapis do pliku zamiast na stdout
+    \\      --include-serials           pokaż numery seryjne (domyślnie maskowane)
+    \\      --no-disks                  pomiń odczyt dysków (SMART)
+    \\      --sys-replay <f.sysimg>     dane systemowe z pliku capture
+    \\      --cpu-replay <f.cpuimg>     CPU z pliku capture
+    \\  ferrumscope capture-sys <plik.sysimg> [--include-serials]
+    \\                                  zapisz surowe SMBIOS/PCI/GPU/dyski (seriale maskowane)
     \\  ferrumscope version             wersja
     \\
 ;
@@ -169,6 +182,13 @@ pub fn main() !u8 {
     if (std.mem.eql(u8, cmd, "sensors")) {
         return cmdSensors(alloc, argv[2..]);
     }
+    if (std.mem.eql(u8, cmd, "report")) return cmdReport(alloc, argv[2..], null);
+    if (std.mem.eql(u8, cmd, "board")) return cmdReport(alloc, argv[2..], "board");
+    if (std.mem.eql(u8, cmd, "memory")) return cmdReport(alloc, argv[2..], "memory");
+    if (std.mem.eql(u8, cmd, "gpu")) return cmdReport(alloc, argv[2..], "graphics");
+    if (std.mem.eql(u8, cmd, "storage")) return cmdReport(alloc, argv[2..], "storage");
+    if (std.mem.eql(u8, cmd, "sensors-all")) return cmdReport(alloc, argv[2..], "sensors");
+    if (std.mem.eql(u8, cmd, "capture-sys")) return cmdCaptureSys(alloc, argv[2..]);
 
     try errw().print("ferrumscope: nieznane polecenie '{s}'\n\n", .{cmd});
     try errw().writeAll(Usage);
@@ -1270,5 +1290,131 @@ fn cmdHwdb() !u8 {
         const v: hwdb_mod.VendorId = @enumFromInt(@as(u8, @intCast(idx)));
         try w.print("    {s: <8} : {d}\n", .{ @tagName(v), n });
     }
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// `report`, `board`, `memory`, `gpu`, `storage` — strony wspólne z GUI
+// ---------------------------------------------------------------------------
+
+const app_mod = @import("app.zig");
+const report_mod = ferrum.sys.report;
+
+fn readArgFile(alloc: std.mem.Allocator, path: []const u8) ?[]u8 {
+    return std.fs.cwd().readFileAlloc(alloc, path, 64 * 1024 * 1024) catch |e| {
+        errw().print("ferrumscope: nie mogę czytać '{s}': {t}\n", .{ path, e }) catch {};
+        return null;
+    };
+}
+
+fn cmdReport(alloc: std.mem.Allocator, rest: [][:0]u8, only: ?[]const u8) !u8 {
+    const Format = enum { txt, html, json };
+    var format: Format = .txt;
+    var out_path: ?[]const u8 = null;
+    var opts_export: report_mod.ExportOptions = .{};
+    var opts: app_mod.Options = .{};
+    var sys_text: ?[]u8 = null;
+    var cpu_text: ?[]u8 = null;
+    defer if (sys_text) |t| alloc.free(t);
+    defer if (cpu_text) |t| alloc.free(t);
+
+    var i: usize = 0;
+    while (i < rest.len) : (i += 1) {
+        const a = rest[i];
+        if (std.mem.startsWith(u8, a, "--format=")) {
+            format = std.meta.stringToEnum(Format, a["--format=".len..]) orelse {
+                try errw().print("ferrumscope: nieznany format '{s}' (txt|html|json)\n", .{a});
+                return 2;
+            };
+        } else if (std.mem.eql(u8, a, "-o") and i + 1 < rest.len) {
+            i += 1;
+            out_path = rest[i];
+        } else if (std.mem.eql(u8, a, "--include-serials")) {
+            opts_export.include_serials = true;
+        } else if (std.mem.eql(u8, a, "--no-disks")) {
+            opts.disks = false;
+        } else if (std.mem.eql(u8, a, "--sys-replay") and i + 1 < rest.len) {
+            i += 1;
+            sys_text = readArgFile(alloc, rest[i]) orelse return 1;
+            opts.sys_replay = sys_text;
+            opts.sys_replay_name = rest[i];
+        } else if (std.mem.eql(u8, a, "--cpu-replay") and i + 1 < rest.len) {
+            i += 1;
+            cpu_text = readArgFile(alloc, rest[i]) orelse return 1;
+            opts.cpu_replay = cpu_text;
+            opts.cpu_replay_name = rest[i];
+        } else {
+            try errw().print("ferrumscope: nieznana opcja '{s}'\n", .{a});
+            return 2;
+        }
+    }
+
+    const st = try app_mod.State.create(alloc, opts);
+    defer st.destroy();
+    // Druga próbka po krótkiej przerwie: obciążenie i zegar liczą się z różnicy.
+    st.tick();
+    if (opts.cpu_replay == null) std.Thread.sleep(500 * std.time.ns_per_ms);
+    st.tick();
+    var pages = st.buildPages();
+    if (only) |id| {
+        for (pages, 0..) |p, k| {
+            if (std.mem.eql(u8, p.id, id)) {
+                pages = pages[k .. k + 1];
+                break;
+            }
+        }
+    }
+    const r = st.reportOf(pages);
+
+    var file: ?std.fs.File = null;
+    defer if (file) |f| f.close();
+    var fbuf: [16 * 1024]u8 = undefined;
+    var fw: std.fs.File.Writer = undefined;
+    const w: *std.Io.Writer = if (out_path) |p| blk: {
+        file = std.fs.cwd().createFile(p, .{}) catch |e| {
+            try errw().print("ferrumscope: nie mogę utworzyć '{s}': {t}\n", .{ p, e });
+            return 1;
+        };
+        fw = file.?.writer(&fbuf);
+        break :blk &fw.interface;
+    } else out();
+    switch (format) {
+        .txt => try report_mod.writeText(w, r, opts_export),
+        .html => try report_mod.writeHtml(w, r, opts_export),
+        .json => try report_mod.writeJson(w, r, opts_export),
+    }
+    try w.flush();
+    if (out_path) |p| try errw().print("zapisano: {s} (numery seryjne: {s})\n", .{ p, if (opts_export.include_serials) "jawne" else "zamaskowane" });
+    return 0;
+}
+
+fn cmdCaptureSys(alloc: std.mem.Allocator, rest: [][:0]u8) !u8 {
+    if (@import("builtin").os.tag != .windows) {
+        try errw().print("ferrumscope: capture-sys jest dostępny tylko na Windows\n", .{});
+        return 1;
+    }
+    var path: ?[]const u8 = null;
+    var include = false;
+    for (rest) |a| {
+        if (std.mem.eql(u8, a, "--include-serials")) include = true else path = a;
+    }
+    const p = path orelse {
+        try errw().print("ferrumscope: brak ścieżki pliku .sysimg\n", .{});
+        return 2;
+    };
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var s = ferrum.sys.win.collect.collect(a, .{});
+    if (!include) s = try ferrum.capture.sysimg.masked(a, s);
+    const f = try std.fs.cwd().createFile(p, .{});
+    defer f.close();
+    var buf: [16 * 1024]u8 = undefined;
+    var fw = f.writer(&buf);
+    try ferrum.capture.sysimg.write(&fw.interface, s, "FerrumScope " ++ version ++ " capture-sys");
+    try fw.interface.flush();
+    try errw().print("zapisano: {s} (SMBIOS {s}, {d} PCI, {d} GPU, {d} dysków, seriale: {s})\n", .{
+        p, s.smbios_status.label(), s.pci.len, s.gpus.len, s.disks.len, if (include) "JAWNE" else "zamaskowane",
+    });
     return 0;
 }

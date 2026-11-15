@@ -1225,3 +1225,133 @@ test "hwdb AMD: rewizje Milan wprost z AMD Revision Guide 56683" {
     const f = db.steppingNameFact(.amd, ids.Signature.fromEax(0x00A00F12)).?;
     try std.testing.expectEqualStrings("Milan-B2", db.text(f.stepping_name));
 }
+
+// ---------------------------------------------------------------------------
+// Dane systemowe: replay `.sysimg` przez te same strony co GUI i CLI
+// ---------------------------------------------------------------------------
+
+const app = @import("app.zig");
+const pci_embedded = @import("db/pci_embedded.zig");
+const sysimg = ferrum.capture.sysimg;
+const sys_report = ferrum.sys.report;
+
+fn findPage(pages: []const sys_report.Page, id: []const u8) *const sys_report.Page {
+    for (pages) |*p| if (std.mem.eql(u8, p.id, id)) return p;
+    @panic("brak strony");
+}
+
+fn fieldValue(p: *const sys_report.Page, section_prefix: []const u8, label: []const u8) ?[]const u8 {
+    for (p.sections.items) |s| {
+        if (!std.mem.startsWith(u8, s.title, section_prefix)) continue;
+        for (s.fields.items) |f| if (std.mem.eql(u8, f.label, label)) return f.value;
+    }
+    return null;
+}
+
+fn replayState() !*app.State {
+    return app.State.create(std.testing.allocator, .{
+        .cpu_replay = fixtures.amd_ryzen7_5800x3d_native,
+        .cpu_replay_name = "amd_ryzen7_5800x3d_native.cpuimg",
+        .sys_replay = fixtures.sys_asrock_b550,
+        .sys_replay_name = "asrock_b550_5800x3d_rx7900xtx.sysimg",
+        .live = false,
+    });
+}
+
+test "sysimg replay: płyta, chipset i BIOS z SMBIOS + pci.ids" {
+    const st = try replayState();
+    defer st.destroy();
+    const pages = st.buildPages();
+    const board = findPage(pages, "board");
+    try std.testing.expectEqualStrings("ASRock B550 Taichi", board.headline);
+    try std.testing.expectEqualStrings("AMD 500 Series Chipset", fieldValue(board, "Chipset", "Chipset").?);
+    try std.testing.expectEqualStrings("Starship/Matisse Root Complex", fieldValue(board, "Chipset", "Mostek hosta").?);
+    try std.testing.expectEqualStrings("P3.20", fieldValue(board, "BIOS", "Wersja").?);
+    try std.testing.expectEqualStrings("Socket AM4", fieldValue(board, "Gniazdo", "Gniazdo").?);
+}
+
+test "sysimg replay: pamięć z SMBIOS typ 17" {
+    const st = try replayState();
+    defer st.destroy();
+    const mem = findPage(st.buildPages(), "memory");
+    try std.testing.expectEqualStrings("32 GB DDR4", mem.headline);
+    try std.testing.expectEqualStrings("2 z 4 zajęte", fieldValue(mem, "Podsumowanie", "Gniazda").?);
+    try std.testing.expectEqualStrings("4000 MT/s", fieldValue(mem, "Gniazdo DIMM 1", "Prędkość skonfigurowana").?);
+    try std.testing.expectEqualStrings("F4-4000C18-16GTZR", fieldValue(mem, "Gniazdo DIMM 1", "Part number").?);
+}
+
+test "sysimg replay: grafika z DXGI + pci.ids (chip, karta, łącze)" {
+    const st = try replayState();
+    defer st.destroy();
+    const g = findPage(st.buildPages(), "graphics");
+    try std.testing.expectEqualStrings("AMD Radeon RX 7900 XTX", g.headline);
+    try std.testing.expect(std.mem.startsWith(u8, fieldValue(g, "AMD Radeon RX 7900 XTX", "Układ GPU").?, "Navi 31"));
+    try std.testing.expectEqualStrings("1849:5304", fieldValue(g, "AMD Radeon RX 7900 XTX", "Subsystem").?);
+    try std.testing.expect(std.mem.indexOf(u8, fieldValue(g, "AMD Radeon RX 7900 XTX", "Łącze PCIe").?, "x16") != null);
+    // Replay nie ma bibliotek producenta: czujniki są „niedostępne” z powodem, nie zerem.
+    try std.testing.expectEqualStrings("—", fieldValue(g, "AMD Radeon RX 7900 XTX — czujniki", "Temperatura GPU").?);
+    try std.testing.expect(g.links.items.len >= 2);
+}
+
+test "sysimg replay: dyski — NVMe log i ATA SMART dekodowane z capture" {
+    const st = try replayState();
+    defer st.destroy();
+    const d = findPage(st.buildPages(), "storage");
+    var nvme: usize = 0;
+    var healthy: usize = 0;
+    for (d.sections.items) |s| {
+        for (s.fields.items) |f| {
+            if (std.mem.eql(u8, f.label, "Magistrala") and std.mem.eql(u8, f.value, "NVMe")) nvme += 1;
+            if (std.mem.eql(u8, f.label, "Stan zdrowia") and std.mem.eql(u8, f.value, "dobry")) healthy += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), nvme);
+    try std.testing.expect(healthy >= 8);
+}
+
+test "sysimg replay: fixture nie zawiera numerów seryjnych, a raport je maskuje" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const s = try sysimg.parse(arena.allocator(), fixtures.sys_asrock_b550);
+    try std.testing.expect(s.serials_masked);
+
+    const st = try replayState();
+    defer st.destroy();
+    const pages = st.buildPages();
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    try sys_report.writeJson(&out.writer, st.reportOf(pages), .{});
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, out.written(), .{});
+    defer parsed.deinit();
+    // Każde pole oznaczone jako wrażliwe jest w JSON zamaskowane albo jest zaślepką.
+    for (parsed.value.object.get("pages").?.array.items) |p| {
+        for (p.object.get("sections").?.array.items) |sec| {
+            for (sec.object.get("fields").?.array.items) |f| {
+                if (!f.object.get("sensitive").?.bool) continue;
+                const v = f.object.get("value").?.string;
+                const st_ = f.object.get("state").?.string;
+                try std.testing.expect(std.mem.indexOfScalar(u8, v, '*') != null or !std.mem.eql(u8, st_, "ok"));
+            }
+        }
+    }
+}
+
+test "pci.ids: wbudowana baza otwiera się i zna typowe urządzenia" {
+    const db = pci_embedded.get().?;
+    try std.testing.expect(db.counts().vendors > 2000);
+    try std.testing.expectEqualStrings("Starship/Matisse Root Complex", db.deviceName(0x1022, 0x1480).?);
+    try std.testing.expect(std.mem.indexOf(u8, pci_embedded.attribution, "BSD") != null);
+}
+
+test "CPU page: cache w stylu „8 x 32 KB” i lista instrukcji z replay" {
+    const st = try replayState();
+    defer st.destroy();
+    const cpu = findPage(st.buildPages(), "cpu");
+    try std.testing.expectEqualStrings("8 x 32 KB", fieldValue(cpu, "Pamięć podręczna", "L1 Data").?);
+    try std.testing.expectEqualStrings("1 x 96 MB", fieldValue(cpu, "Pamięć podręczna", "L3").?);
+    const ins = fieldValue(cpu, "Zestaw instrukcji", "Instrukcje").?;
+    inline for (.{ "MMX", "SSE4.2", "x86-64", "AVX2", "AES", "SHA" }) |n| {
+        try std.testing.expect(std.mem.indexOf(u8, ins, n) != null);
+    }
+    try std.testing.expectEqualStrings("x86-64-v3", fieldValue(cpu, "Zestaw instrukcji", "Poziom x86-64").?);
+}

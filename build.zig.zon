@@ -1,16 +1,23 @@
+// FerrumScope — SPDX-License-Identifier: GPL-3.0-or-later (see LICENSE).
+// Bundled data keeps its own license: db/source/pci/pci.ids is
+// GPL-2.0-or-later OR BSD-3-Clause (header of that file).
 .{
     .name = .ferrumscope,
-    .version = "0.1.0-dev",
+    .version = "0.2.0-dev",
     .minimum_zig_version = "0.15.2",
     .dependencies = .{},
     .fingerprint = 0x18bf1edbdd8e9d34,
+    // Only what the build needs. tools/zig (the pinned toolchain) and other
+    // local artefacts are deliberately not part of the package.
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
-        "tools",
         "db",
+        "tools/hwdb_compile.zig",
+        "tools/pciids_compile.zig",
         "README.md",
+        "CHANGELOG.md",
         "LICENSE",
     },
 }

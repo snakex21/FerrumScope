@@ -50,6 +50,7 @@ pub const probe = struct {
 
 pub const decode = struct {
     pub const cpu_x86 = @import("decode/cpu_x86.zig");
+    pub const isa_x86 = @import("decode/isa_x86.zig");
 };
 
 pub const db = struct {
@@ -59,6 +60,31 @@ pub const db = struct {
 pub const capture = struct {
     pub const cpuimg = @import("capture/cpuimg.zig");
     pub const telemimg = @import("capture/telemimg.zig");
+    pub const sysimg = @import("capture/sysimg.zig");
+};
+
+/// Dane systemowe bez sterownika: SMBIOS, PCI (pci.ids), GPU, dyski, raport.
+/// Moduły czyste (parsery, strony, eksport) są wieloplatformowe; zbieranie
+/// danych na Windows siedzi w `sys.win` i istnieje tylko na Windows.
+pub const sys = struct {
+    pub const report = @import("sys/report.zig");
+    pub const snapshot = @import("sys/snapshot.zig");
+    pub const smbios = @import("sys/smbios.zig");
+    pub const pciids = @import("sys/pciids.zig");
+    pub const pciids_format = @import("sys/pciids_format.zig");
+    pub const storage_parse = @import("sys/storage_parse.zig");
+    pub const links = @import("sys/links.zig");
+    pub const pages_cpu = @import("sys/pages_cpu.zig");
+    pub const pages_system = @import("sys/pages_system.zig");
+    pub const win = if (builtin.os.tag == .windows) struct {
+        pub const devices = @import("sys/win/devices.zig");
+        pub const cpuload = @import("sys/win/cpuload.zig");
+        pub const storage = @import("sys/win/storage.zig");
+        pub const gpu_vendor = @import("sys/win/gpu_vendor.zig");
+        pub const adl = @import("sys/win/adl.zig");
+        pub const nvapi = @import("sys/win/nvapi.zig");
+        pub const collect = @import("sys/win/collect.zig");
+    } else struct {};
 };
 
 test {
@@ -68,3 +94,4 @@ test {
 }
 
 const std = @import("std");
+const builtin = @import("builtin");
