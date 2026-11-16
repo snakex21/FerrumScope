@@ -75,6 +75,32 @@ pub fn cacheLabel(b: *report.Builder, c: model.CacheInfo, count: u32) []const u8
     return b.fmt("{d} x {d} KB", .{ n, k });
 }
 
+pub const CacheTotal = struct { bytes: u64 = 0, derived: bool = false };
+
+/// Łączny rozmiar cache procesora: suma po wszystkich poziomach rozmiaru
+/// instancji × liczby instancji (5800X3D: 8×32 + 8×32 + 8×512 KB + 96 MB).
+pub fn cacheTotal(info: *const model.CpuInfo) CacheTotal {
+    var t: CacheTotal = .{};
+    for (info.cacheSlice()) |c| {
+        const inst = instances(info, c);
+        t.bytes += c.size_bytes * @as(u64, @max(inst.n, 1));
+        if (inst.derived) t.derived = true;
+    }
+    return t;
+}
+
+/// „100.5 MB”, „1.3 MB”, „384 KB” — jedno miejsce po przecinku tylko gdy
+/// potrzebne (wartości techniczne, kropka dziesiętna jak w reszcie raportu).
+pub fn totalLabel(b: *report.Builder, bytes: u64) []const u8 {
+    const mib: u64 = 1024 * 1024;
+    if (bytes >= mib) {
+        const tenths = (bytes * 10 + mib / 2) / mib;
+        if (tenths % 10 == 0) return b.fmt("{d} MB", .{tenths / 10});
+        return b.fmt("{d}.{d} MB", .{ tenths / 10, tenths % 10 });
+    }
+    return b.fmt("{d} KB", .{kb(bytes)});
+}
+
 /// Nazwa poziomu cache (etykieta pola; GUI wiąże po `i18n.t("L1 Data")` itd.).
 fn cacheName(c: model.CacheInfo) []const u8 {
     return switch (c.level) {
@@ -279,9 +305,12 @@ pub fn build(arena: std.mem.Allocator, in: CpuInput) report.Page {
     }
     for (info.cacheSlice()) |c| {
         const inst = instances(info, c);
+        // Asocjacyjność obok rozmiaru, jak w CPU-Z („8 x 32 KB, 8-way”) —
+        // tylko gdy liść cache ją podał (bez zgadywania).
+        const size = cacheLabel(&b, c, inst.n);
         b.add(.{
             .label = cacheName(c),
-            .value = cacheLabel(&b, c, inst.n),
+            .value = if (c.associativity > 0) b.tf("{size}, {ways}-way", .{ .size = size, .ways = c.associativity }) else size,
             .confidence = if (inst.derived) .medium else .high,
             .note = if (inst.derived) b.t("liczba instancji wyprowadzona z topologii (cache prywatny rdzenia × liczba rdzeni)") else "",
             .raw = b.tf("{bytes} B/instancję", .{ .bytes = c.size_bytes }),
@@ -291,6 +320,20 @@ pub fn build(arena: std.mem.Allocator, in: CpuInput) report.Page {
             .label = cacheDescName(c),
             .value = if (c.associativity > 0) b.tp("{ways}-way, linia {line} B, {n} zestawów", c.sets, .{ .ways = c.associativity, .line = c.line_size }) else b.tp("linia {line} B, {n} zestawów", c.sets, .{ .line = c.line_size }),
             .source = b.t("CPUID (liść cache: 4 / 0x8000001D)"),
+        });
+    }
+
+    // Suma wszystkich poziomów: rozmiar instancji × liczba instancji.
+    const total = cacheTotal(info);
+    if (total.bytes > 0) {
+        page.cache_total_bytes = total.bytes;
+        b.add(.{
+            .label = b.t("Łącznie"),
+            .value = totalLabel(&b, total.bytes),
+            .raw = b.fmt("{d} B", .{total.bytes}),
+            .confidence = if (total.derived) .medium else .high,
+            .note = if (total.derived) b.t("liczba instancji wyprowadzona z topologii (cache prywatny rdzenia × liczba rdzeni)") else "",
+            .source = b.t("suma wszystkich poziomów cache (rozmiar instancji × liczba instancji)"),
         });
     }
 

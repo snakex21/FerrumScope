@@ -857,5 +857,12 @@
   "Kanał {channel}": "Csatorna {channel}",
   "Tryb kanałów": "Csatornamód",
   "tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po podsystemie i numerze części VBIOS": "gondozott táblázat (db/source/gpu_boards.toml), egyezés alrendszer és VBIOS-cikkszám alapján",
-  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "a kártya más változatainak is lehet ugyanez a PCI-alrendszere — a VBIOS-cikkszám nem volt elérhető"
+  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "a kártya más változatainak is lehet ugyanez a PCI-alrendszere — a VBIOS-cikkszám nem volt elérhető",
+  "Łącznie": "Összesen",
+  "{size}, {ways}-way": "{size}, {ways} utas",
+  "suma wszystkich poziomów cache (rozmiar instancji × liczba instancji)": "az összes gyorsítótár-szint összege (példányméret × példányszám)",
+  "pewność\u0004wysoka": "magas",
+  "pewność\u0004średnia": "közepes",
+  "pewność\u0004niska": "alacsony",
+  "pewność\u0004nieznana": "ismeretlen"
 }

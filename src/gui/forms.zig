@@ -144,6 +144,7 @@ pub const tabs = [_]Tab{
                     &.{.{ .label = "L1 Instr.", .sect = C, .field = "L1 Instruction" }},
                     &.{.{ .label = "L2", .sect = C, .field = "L2" }},
                     &.{.{ .label = "L3", .sect = C, .field = "L3" }},
+                    &.{.{ .label = "Łącznie", .sect = C, .field = "Łącznie" }},
                 } },
             },
             &.{.{ .title = "Topologia", .label_w = 56, .rows = &.{
@@ -172,6 +173,9 @@ pub const tabs = [_]Tab{
             &.{.{ .title = "L3", .rows = &.{
                 &.{.{ .label = "Rozmiar", .sect = C, .field = "L3" }},
                 &.{.{ .label = "Opis", .sect = C, .field = "L3 — opis" }},
+            } }},
+            &.{.{ .title = "Łącznie", .rows = &.{
+                &.{.{ .label = "Rozmiar", .sect = C, .field = "Łącznie" }},
             } }},
         },
     },
@@ -311,7 +315,6 @@ fn eql(a: []const u8, b: []const u8) bool {
 }
 
 test "forms: identyfikatory zakładek są unikalne, a komórki mają etykiety" {
-    const std = @import("std");
     for (tabs, 0..) |t, i| {
         for (tabs[i + 1 ..]) |u| try std.testing.expect(!eql(t.id, u.id));
         for (t.bands) |band| for (band) |g| for (g.rows) |r| {
@@ -326,8 +329,21 @@ test "forms: identyfikatory zakładek są unikalne, a komórki mają etykiety" {
 // Wiązanie komórek z polami raportu (wspólne dla GUI i testów)
 // ---------------------------------------------------------------------------
 
+const std = @import("std");
 const report = @import("../sys/report.zig");
 const i18n = @import("../i18n/i18n.zig");
+
+/// Tekst pola formularza: wartość z maskowaniem numerów seryjnych (odsłoniętych
+/// tylko przy `show_serials` — przełącznik „Pokaż numery seryjne” działa na
+/// żywo, bo okno woła tę funkcję przy każdym wypełnieniu), a brak wartości
+/// razem z powodem — samo „—” nic nie mówi.
+pub fn displayValue(f: report.Field, show_serials: bool, buf: []u8) []const u8 {
+    const v = report.shownValue(f, .{ .include_serials = show_serials }, buf);
+    if (eql(v, "—") and f.state != .ok) {
+        return std.fmt.bufPrint(buf, "— ({s})", .{f.state.label()}) catch v;
+    }
+    return v;
+}
 
 pub fn findPage(pages: []const report.Page, id: []const u8) ?*const report.Page {
     for (pages) |*p| if (eql(p.id, id)) return p;

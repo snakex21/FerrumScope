@@ -1410,13 +1410,111 @@ test "CPU page: cache w stylu „8 x 32 KB” i lista instrukcji z replay" {
     const st = try replayState();
     defer st.destroy();
     const cpu = findPage(st.buildPages(), "cpu");
-    try std.testing.expectEqualStrings("8 x 32 KB", fieldValue(cpu, "Pamięć podręczna", "L1 Data").?);
-    try std.testing.expectEqualStrings("1 x 96 MB", fieldValue(cpu, "Pamięć podręczna", "L3").?);
+    // Asocjacyjność obok rozmiaru jak w CPU-Z (z liścia 0x8000001D).
+    try std.testing.expectEqualStrings("8 x 32 KB, 8-way", fieldValue(cpu, "Pamięć podręczna", "L1 Data").?);
+    try std.testing.expectEqualStrings("8 x 512 KB, 8-way", fieldValue(cpu, "Pamięć podręczna", "L2").?);
+    try std.testing.expectEqualStrings("1 x 96 MB, 16-way", fieldValue(cpu, "Pamięć podręczna", "L3").?);
     const ins = fieldValue(cpu, "Zestaw instrukcji", "Instrukcje").?;
     inline for (.{ "MMX", "SSE4.2", "x86-64", "AVX2", "AES", "SHA" }) |n| {
         try std.testing.expect(std.mem.indexOf(u8, ins, n) != null);
     }
     try std.testing.expectEqualStrings("x86-64-v3", fieldValue(cpu, "Zestaw instrukcji", "Poziom x86-64").?);
+}
+
+test "CPU page: łączny cache 5800X3D = 8×32 + 8×32 + 8×512 KB + 96 MB = 100.5 MB (także w JSON)" {
+    const st = try replayState();
+    defer st.destroy();
+    const pages = st.buildPages();
+    const cpu = findPage(pages, "cpu");
+    const want: u64 = (8 * 32 + 8 * 32 + 8 * 512) * 1024 + 96 * 1024 * 1024;
+    try std.testing.expectEqual(@as(u64, 105_381_888), want);
+    try std.testing.expectEqual(@as(?u64, want), cpu.cache_total_bytes);
+    try std.testing.expectEqualStrings("100.5 MB", fieldValue(cpu, "Pamięć podręczna", "Łącznie").?);
+
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    try sys_report.writeJson(&out.writer, st.reportOf(pages), .{});
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, out.written(), .{});
+    defer parsed.deinit();
+    var found = false;
+    for (parsed.value.object.get("pages").?.array.items) |p| {
+        if (!std.mem.eql(u8, p.object.get("id").?.string, "cpu")) continue;
+        try std.testing.expectEqual(@as(i64, @intCast(want)), p.object.get("cache_total_bytes").?.integer);
+        found = true;
+    }
+    try std.testing.expect(found);
+}
+
+test "GUI: „Pokaż numery seryjne” odsłania numery na Płycie, w Pamięci i Dyskach, a odznaczenie maskuje je z powrotem" {
+    const forms = @import("gui/forms.zig");
+    const st = try replayState();
+    defer st.destroy();
+    const pages = st.buildPages();
+    var seen: usize = 0;
+    for (forms.tabs) |t| {
+        if (t.kind != .form) continue;
+        const p = forms.findPage(pages, t.page).?;
+        // Moduł 1 jest obsadzony (gniazdo 0 jest puste na tej płycie).
+        const idx: usize = if (std.mem.eql(u8, t.id, "memory")) 1 else 0;
+        for (t.bands) |band| for (band) |g| for (g.rows) |r| for (r) |c| {
+            if (!std.mem.eql(u8, c.field, "Numer seryjny")) continue;
+            const f = forms.resolve(p, c, idx) orelse return error.TestUnexpectedResult;
+            try std.testing.expect(f.sensitive);
+            var b1: [256]u8 = undefined;
+            var b2: [256]u8 = undefined;
+            var b3: [256]u8 = undefined;
+            const masked = forms.displayValue(f.*, false, &b1);
+            const shown = forms.displayValue(f.*, true, &b2);
+            const again = forms.displayValue(f.*, false, &b3);
+            try std.testing.expect(masked.len > 0);
+            for (masked) |ch| try std.testing.expectEqual(@as(u8, '*'), ch);
+            // Fixture ma seriale zastąpione „X…” — odsłonięta wartość = wartość pola.
+            try std.testing.expectEqualStrings(f.value, shown);
+            try std.testing.expect(std.mem.indexOfScalar(u8, shown, '*') == null);
+            try std.testing.expectEqualStrings(masked, again);
+            seen += 1;
+        };
+    }
+    try std.testing.expectEqual(@as(usize, 3), seen);
+}
+
+test "pewność: pl GUI/TXT/HTML pokazuje „wysoka”, a JSON zostaje przy „high”" {
+    const i18n = ferrum.i18n;
+    const loc_sources = i18n.embeddedSources(@import("locales_embedded"));
+    i18n.setSources(&loc_sources);
+    defer {
+        i18n.setSources(&.{});
+        i18n.setLocale("pl");
+    }
+    i18n.setLocale("pl");
+    try std.testing.expectEqualStrings("wysoka", sys_report.confidenceLabel(.high));
+    try std.testing.expectEqualStrings("średnia", sys_report.confidenceLabel(.medium));
+    try std.testing.expectEqualStrings("niska", sys_report.confidenceLabel(.low));
+    try std.testing.expectEqualStrings("nieznana", sys_report.confidenceLabel(.unknown));
+
+    const st = try replayState();
+    defer st.destroy();
+    const r = st.reportOf(st.buildPages());
+    var txt: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer txt.deinit();
+    try sys_report.writeText(&txt.writer, r, .{});
+    try std.testing.expect(std.mem.indexOf(u8, txt.written(), "[pewność: wysoka]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, txt.written(), "[pewność: high]") == null);
+    var html: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer html.deinit();
+    try sys_report.writeHtml(&html.writer, r, .{});
+    try std.testing.expect(std.mem.indexOf(u8, html.written(), "<span class=\"c-high\">[wysoka]</span>") != null);
+    var json: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer json.deinit();
+    try sys_report.writeJson(&json.writer, r, .{});
+    try std.testing.expect(std.mem.indexOf(u8, json.written(), "\"confidence\": \"high\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json.written(), "\"confidence\": \"wysoka\"") == null);
+
+    // Inne języki: przetłumaczone, JSON bez zmian.
+    i18n.setLocale("de");
+    try std.testing.expectEqualStrings("hoch", sys_report.confidenceLabel(.high));
+    i18n.setLocale("en");
+    try std.testing.expectEqualStrings("high", sys_report.confidenceLabel(.high));
 }
 
 test "GUI: komórki widoku uporządkowanego wskazują istniejące pola raportu" {

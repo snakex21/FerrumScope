@@ -850,12 +850,12 @@ fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb, mode: Mode, origin: 
             if (info.stepping_name) |s| try row(w, i18n.t("Stepping nm"), "{s}", .{i18n.tf(ta(), "{value} (źródło: {source}, pewność: {confidence})", .{
                 .value = s,
                 .source = info.stepping_name_source.toSlice(),
-                .confidence = info.stepping_name_provenance.confidence.toSlice(),
+                .confidence = report_mod.confidenceLabel(info.stepping_name_provenance.confidence),
             })});
             if (info.socket_name) |s| try row(w, i18n.t("Socket"), "{s}", .{i18n.tf(ta(), "{value} (źródło: {source}, pewność: {confidence})", .{
                 .value = s,
                 .source = info.socket_source.toSlice(),
-                .confidence = info.socket_confidence.toSlice(),
+                .confidence = report_mod.confidenceLabel(info.socket_confidence),
             })});
             if (info.variant) |v| try row(w, i18n.t("Variant"), "{s}", .{i18n.tf(ta(), "{value} (źródło: {source})", .{
                 .value = v,
@@ -994,7 +994,7 @@ fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb, mode: Mode, origin: 
                     .value = s,
                     .source = info.stepping_name_source.toSlice(),
                     .type = info.stepping_name_provenance.source_type.toSlice(),
-                    .confidence = info.stepping_name_provenance.confidence.toSlice(),
+                    .confidence = report_mod.confidenceLabel(info.stepping_name_provenance.confidence),
                 })});
                 if (info.stepping_name_provenance.notes) |n|
                     try w.print("      {s}<- {s}\n", .{ padCols(&nb, i18n.t("notatka"), 15), n });
@@ -1006,7 +1006,7 @@ fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb, mode: Mode, origin: 
                     .value = s,
                     .source = info.socket_source.toSlice(),
                     .type = info.socket_provenance.source_type.toSlice(),
-                    .confidence = info.socket_confidence.toSlice(),
+                    .confidence = report_mod.confidenceLabel(info.socket_confidence),
                 })});
                 if (info.socket_provenance.notes) |n|
                     try w.print("      {s}<- {s}\n", .{ padCols(&nb, i18n.t("notatka"), 15), n });
@@ -1025,7 +1025,7 @@ fn report(raw_info: core.raw.RawCpuInfo, db: hwdb_mod.Hwdb, mode: Mode, origin: 
                 .value = v,
                 .source = info.variant_source.toSlice(),
                 .type = info.variant_provenance.source_type.toSlice(),
-                .confidence = info.variant_provenance.confidence.toSlice(),
+                .confidence = report_mod.confidenceLabel(info.variant_provenance.confidence),
             })});
             try w.print("  display           <- {s}\n", .{explainDisplay(info.display)});
             if (info.db_source) |s| try w.print("  provenance        <- \"{s}\"\n", .{s});

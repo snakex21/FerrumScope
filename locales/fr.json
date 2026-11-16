@@ -857,5 +857,12 @@
   "Kanał {channel}": "Canal {channel}",
   "Tryb kanałów": "Mode des canaux",
   "tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po podsystemie i numerze części VBIOS": "table organisée (db/source/gpu_boards.toml), correspondance par sous-système et référence VBIOS",
-  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "d’autres versions de la carte peuvent partager ce sous-système PCI — la référence VBIOS n’était pas disponible"
+  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "d’autres versions de la carte peuvent partager ce sous-système PCI — la référence VBIOS n’était pas disponible",
+  "Łącznie": "Total",
+  "{size}, {ways}-way": "{size}, {ways} voies",
+  "suma wszystkich poziomów cache (rozmiar instancji × liczba instancji)": "somme de tous les niveaux de cache (taille par instance × nombre d’instances)",
+  "pewność\u0004wysoka": "élevée",
+  "pewność\u0004średnia": "moyenne",
+  "pewność\u0004niska": "faible",
+  "pewność\u0004nieznana": "inconnue"
 }

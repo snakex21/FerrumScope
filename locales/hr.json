@@ -865,5 +865,12 @@
   "Kanał {channel}": "Kanal {channel}",
   "Tryb kanałów": "Način kanala",
   "tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po podsystemie i numerze części VBIOS": "kurirana tablica (db/source/gpu_boards.toml), podudaranje po podsustavu i broju dijela VBIOS-a",
-  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "druge verzije kartice mogu imati isti PCI podsustav — broj dijela VBIOS-a nije bio dostupan"
+  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "druge verzije kartice mogu imati isti PCI podsustav — broj dijela VBIOS-a nije bio dostupan",
+  "Łącznie": "Ukupno",
+  "{size}, {ways}-way": "{size}, {ways}-struka",
+  "suma wszystkich poziomów cache (rozmiar instancji × liczba instancji)": "zbroj svih razina predmemorije (veličina instance × broj instanci)",
+  "pewność\u0004wysoka": "visoka",
+  "pewność\u0004średnia": "srednja",
+  "pewność\u0004niska": "niska",
+  "pewność\u0004nieznana": "nepoznata"
 }

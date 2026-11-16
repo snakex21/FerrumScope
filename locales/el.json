@@ -857,5 +857,12 @@
   "Kanał {channel}": "Κανάλι {channel}",
   "Tryb kanałów": "Λειτουργία καναλιών",
   "tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po podsystemie i numerze części VBIOS": "επιμελημένος πίνακας (db/source/gpu_boards.toml), αντιστοίχιση κατά υποσύστημα και αριθμό εξαρτήματος VBIOS",
-  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "άλλες εκδόσεις της κάρτας μπορεί να έχουν το ίδιο υποσύστημα PCI — ο αριθμός εξαρτήματος VBIOS δεν ήταν διαθέσιμος"
+  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "άλλες εκδόσεις της κάρτας μπορεί να έχουν το ίδιο υποσύστημα PCI — ο αριθμός εξαρτήματος VBIOS δεν ήταν διαθέσιμος",
+  "Łącznie": "Σύνολο",
+  "{size}, {ways}-way": "{size}, {ways} δρόμων",
+  "suma wszystkich poziomów cache (rozmiar instancji × liczba instancji)": "άθροισμα όλων των επιπέδων cache (μέγεθος στιγμιοτύπου × αριθμός στιγμιοτύπων)",
+  "pewność\u0004wysoka": "υψηλή",
+  "pewność\u0004średnia": "μέτρια",
+  "pewność\u0004niska": "χαμηλή",
+  "pewność\u0004nieznana": "άγνωστη"
 }

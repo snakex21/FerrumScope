@@ -857,5 +857,12 @@
   "Kanał {channel}": "Kanava {channel}",
   "Tryb kanałów": "Kanavatila",
   "tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po podsystemie i numerze części VBIOS": "kuratoitu taulukko (db/source/gpu_boards.toml), osuma alijärjestelmän ja VBIOS-osanumeron perusteella",
-  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "kortin muilla versioilla voi olla sama PCI-alijärjestelmä — VBIOS-osanumero ei ollut saatavilla"
+  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "kortin muilla versioilla voi olla sama PCI-alijärjestelmä — VBIOS-osanumero ei ollut saatavilla",
+  "Łącznie": "Yhteensä",
+  "{size}, {ways}-way": "{size}, {ways}-tie",
+  "suma wszystkich poziomów cache (rozmiar instancji × liczba instancji)": "kaikkien välimuistitasojen summa (instanssin koko × instanssien määrä)",
+  "pewność\u0004wysoka": "korkea",
+  "pewność\u0004średnia": "keskitaso",
+  "pewność\u0004niska": "matala",
+  "pewność\u0004nieznana": "tuntematon"
 }

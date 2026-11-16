@@ -17,6 +17,19 @@ const i18n = @import("../i18n/i18n.zig");
 
 pub const Confidence = model.Confidence;
 
+/// Pewność do wyświetlenia (GUI, TXT, HTML, tekstowe wyjście CLI) w bieżącym
+/// języku: pl „wysoka / średnia / niska / nieznana”. Wartości maszynowe
+/// (JSON, `--json`, klasy CSS) zostają przy `Confidence.toSlice()` —
+/// stałe, angielskie „high/medium/low/unknown”.
+pub fn confidenceLabel(c: Confidence) []const u8 {
+    return switch (c) {
+        .high => i18n.t("pewność\x04wysoka"),
+        .medium => i18n.t("pewność\x04średnia"),
+        .low => i18n.t("pewność\x04niska"),
+        .unknown => i18n.t("pewność\x04nieznana"),
+    };
+}
+
 /// Stan pola. `ok` to odczyt; pozostałe mówią, **dlaczego** wartości nie ma
 /// albo dlaczego jest tylko przybliżeniem.
 pub const State = enum {
@@ -118,6 +131,9 @@ pub const Page = struct {
     links: std.ArrayList(Link) = .empty,
     /// Tylko strona „memory”: mapa gniazd (pusta na innych stronach).
     slots: []const MemSlot = &.{},
+    /// Tylko strona „cpu”: łączny rozmiar cache (suma poziomów × instancji);
+    /// w JSON jako `cache_total_bytes`.
+    cache_total_bytes: ?u64 = null,
 
     pub fn fieldCount(self: *const Page) usize {
         var n: usize = 0;
@@ -247,7 +263,7 @@ pub fn writePageText(w: *std.Io.Writer, p: *const Page, opts: ExportOptions) !vo
                 try w.writeAll("      ");
                 if (raw.len > 0) try w.print("raw={s}  ", .{raw});
                 if (f.source.len > 0) try w.print("{s} {s}", .{ i18n.t("źródło:"), f.source });
-                try w.print("  [{s} {s}]", .{ i18n.t("pewność:"), f.confidence.toSlice() });
+                try w.print("  [{s} {s}]", .{ i18n.t("pewność:"), confidenceLabel(f.confidence) });
                 try w.writeByte('\n');
             }
             if (f.note.len > 0) try w.print("      {s} {s}\n", .{ i18n.t("uwaga:"), f.note });
@@ -305,6 +321,7 @@ pub fn writeJson(w: *std.Io.Writer, r: Report, opts: ExportOptions) !void {
         try writeJsonString(w, p.headline);
         try w.writeAll(", \"summary\": ");
         try writeJsonString(w, p.summary);
+        if (p.cache_total_bytes) |n| try w.print(", \"cache_total_bytes\": {d}", .{n});
         try w.writeAll(",\n     \"sections\": [");
         for (p.sections.items, 0..) |s, si| {
             if (si > 0) try w.writeByte(',');
@@ -481,7 +498,9 @@ pub fn writeHtml(w: *std.Io.Writer, r: Report, opts: ExportOptions) !void {
                 }
                 try w.writeAll("</td><td class=\"s\"><span class=\"src\">");
                 try writeHtmlEscaped(w, f.source);
-                try w.print("</span> <span class=\"c-{s}\">[{s}]</span>", .{ f.confidence.toSlice(), f.confidence.toSlice() });
+                try w.print("</span> <span class=\"c-{s}\">[", .{f.confidence.toSlice()});
+                try writeHtmlEscaped(w, confidenceLabel(f.confidence));
+                try w.writeAll("]</span>");
                 if (f.note.len > 0) {
                     try w.writeAll("<br><span class=\"src\">");
                     try writeHtmlEscaped(w, f.note);

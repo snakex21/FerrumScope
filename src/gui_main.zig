@@ -57,6 +57,9 @@ const ID_SERIALS: u16 = 104;
 const ID_SOURCES: u16 = 105;
 const ID_LISTVIEW: u16 = 106;
 const ID_LANG: u16 = 107;
+/// Tytuł strony (wiersz nad zakładką) — test układu pomija go przy
+/// sprawdzaniu ucięcia tekstu (długie nazwy GPU mogą mieć wielokropek).
+const ID_TITLE: u16 = 108;
 const ID_SELECTOR0: u16 = 300; // + indeks zakładki
 const ID_CELLBTN0: u16 = 400; // + indeks komórki
 const ID_PINBTN0: u16 = 700; // + indeks komórki
@@ -80,17 +83,26 @@ const CellCtl = struct {
     pin: ?w.HWND = null,
     tone: Tone = .normal,
     mark_tone: Tone = .normal,
+    /// Zmierzone szerokości (px przy bieżącym DPI, czcionka okna): tekst
+    /// etykiety, przycisk odnośnika, przycisk „Przypnij”. `measure()`.
+    lbl_w: i32 = 0,
+    btn_w: i32 = 0,
+    pin_w: i32 = 0,
 };
 
 const GroupCtl = struct {
     tab: u8,
     hwnd: ?w.HWND = null,
+    /// Zmierzona szerokość tytułu ramki.
+    title_w: i32 = 0,
 };
 
 /// Kontrolki zakładek specjalnych (Bench, O programie).
 const ExtraCtl = struct {
     tab: u8,
     hwnd: ?w.HWND = null,
+    /// Szerokość przycisku / pola wyboru z tekstu (0 = nie przycisk).
+    want_w: i32 = 0,
 };
 
 const App = struct {
@@ -139,6 +151,16 @@ const App = struct {
     sel_combo: [n_tabs]?w.HWND = @splat(null),
     sel_index: [n_tabs]usize = @splat(0),
     sel_count: [n_tabs]usize = @splat(0),
+    /// Zmierzona szerokość etykiety listy wyboru zakładki.
+    sel_w: [n_tabs]i32 = @splat(0),
+    /// Szerokości pasa dolnego: Odśwież, Pokaż źródła, Pokaż numery, Pełna lista.
+    bar_w: [4]i32 = @splat(0),
+    /// Szerokość etykiety „Język:”.
+    lang_w: i32 = 0,
+    /// Minimalny obszar klienta okna (px) — nic się wtedy nie nakłada ani nie
+    /// ucina; z niego WM_GETMINMAXINFO. 0 = jeszcze nie zmierzono.
+    min_client_w: i32 = 0,
+    min_client_h: i32 = 0,
     shown_rows: usize = 0,
     shown_sections: usize = 0,
     shown_key: usize = std.math.maxInt(usize),
@@ -181,8 +203,61 @@ fn show(h: ?w.HWND, visible: bool) void {
     if (h) |hh| _ = w.ShowWindow(hh, if (visible) w.SW_SHOW else w.SW_HIDE);
 }
 
+// --- Przesuwanie kontrolek: DeferWindowPos w jednym przebiegu układu --------
+//
+// `layout()` otwiera partię (`beginMoves`), każde `move` dopisuje kontrolkę do
+// partii jej rodzica (DeferWindowPos wymaga wspólnego rodzica w jednej
+// partii), a `endMoves` przesuwa wszystko naraz i unieważnia całe okno.
+// SWP_NOCOPYBITS: system nie kopiuje starej zawartości kontrolki w nowe
+// miejsce — kopiowane piksele były jednym ze źródeł „duchów” po zmianie
+// szerokości; całość i tak jest przemalowywana po układzie.
+
+const SWP_NOCOPYBITS: u32 = 0x0100;
+const move_flags = w.SWP_NOZORDER | w.SWP_NOACTIVATE | SWP_NOCOPYBITS;
+const MoveBatch = struct {
+    parents: [8]?w.HWND = @splat(null),
+    hdwp: [8]?*anyopaque = @splat(null),
+    n: usize = 0,
+};
+var move_batch: ?MoveBatch = null;
+
+extern "user32" fn BeginDeferWindowPos(i32) callconv(.winapi) ?*anyopaque;
+extern "user32" fn DeferWindowPos(?*anyopaque, w.HWND, ?w.HWND, i32, i32, i32, i32, u32) callconv(.winapi) ?*anyopaque;
+extern "user32" fn EndDeferWindowPos(?*anyopaque) callconv(.winapi) w.BOOL;
+extern "user32" fn GetParent(w.HWND) callconv(.winapi) ?w.HWND;
+
+fn beginMoves() void {
+    move_batch = .{};
+}
+
+fn endMoves() void {
+    const b = move_batch orelse return;
+    move_batch = null;
+    for (b.hdwp[0..b.n]) |d| {
+        if (d) |dd| _ = EndDeferWindowPos(dd);
+    }
+}
+
 fn move(h: ?w.HWND, x: i32, y: i32, cx: i32, cy: i32) void {
-    if (h) |hh| _ = w.MoveWindow(hh, x, y, cx, cy, 1);
+    const hh = h orelse return;
+    if (move_batch) |*b| {
+        const parent = GetParent(hh);
+        var i: usize = 0;
+        while (i < b.n and b.parents[i] != parent) i += 1;
+        if (i == b.n and b.n < b.parents.len) {
+            b.parents[i] = parent;
+            b.hdwp[i] = BeginDeferWindowPos(64);
+            b.n += 1;
+        }
+        if (i < b.n) {
+            if (b.hdwp[i]) |d| {
+                // Przy błędzie system zwalnia partię — reszta tego rodzica idzie wprost.
+                b.hdwp[i] = DeferWindowPos(d, hh, null, x, y, @max(cx, 0), @max(cy, 0), move_flags);
+                if (b.hdwp[i] != null) return;
+            }
+        }
+    }
+    _ = w.SetWindowPos(hh, null, x, y, @max(cx, 0), @max(cy, 0), move_flags);
 }
 
 fn checked(h: ?w.HWND) bool {
@@ -341,7 +416,7 @@ fn tipText(f: report.Field) [*:0]const u16 {
     var out: std.ArrayList(u8) = .empty;
     out.appendSlice(a, i18n.tf(a, "Źródło: {source}\nPewność: {confidence} · stan: {state}", .{
         .source = if (f.source.len > 0) f.source else "—",
-        .confidence = f.confidence.toSlice(),
+        .confidence = report.confidenceLabel(f.confidence),
         .state = f.state.label(),
     })) catch {};
     if (raw.len > 0) {
@@ -511,7 +586,17 @@ const M = struct {
     const pin_w: i32 = 70;
     const pin_model_w: i32 = 150;
     const sel_h: i32 = 28;
+    /// Najmniejsza szerokość pola wartości.
+    const min_edit: i32 = 48;
+    /// Odstęp etykieta → pole (wliczony w kolumnę etykiet).
+    const label_gap: i32 = 8;
+    /// Najmniejsza szerokość listy wyboru instancji (moduł, karta, dysk).
+    const sel_combo_min: i32 = 200;
 };
+
+/// Wynik przebiegu układu: najmniejsza szerokość obszaru, przy której nic się
+/// nie nakłada ani nie ucina, i dół treści (px, współrzędne obszaru).
+const Fit = struct { min_w: i32 = 0, bottom: i32 = 0 };
 
 fn rowHeight(row: forms.Row) i32 {
     var lines: i32 = 1;
@@ -525,14 +610,57 @@ fn groupHeight(g: *const forms.Group) i32 {
     return h;
 }
 
-fn layoutForm(t: usize, area: w.RECT) void {
+/// Szerokość kolumny etykiety komórki: zmierzony tekst (bieżąca czcionka
+/// i język) + odstęp; szerokość z `forms.zig` jest tylko dolnym progiem.
+fn labelCol(c: *const CellCtl, k: usize, g: *const forms.Group) i32 {
+    const spec: i32 = if (c.cell.label_w > 0) c.cell.label_w else if (k == 0) g.label_w else 0;
+    return @max(px(spec), c.lbl_w + px(M.label_gap));
+}
+
+/// Kolumny etykiet ramki: kolumna 0 wspólna dla wszystkich wierszy (pola
+/// zaczynają się w jednej linii), kolumny 1..2 wspólne dla wierszy o tej samej
+/// liczbie komórek. Indeks: [liczba komórek][kolumna].
+fn groupColumns(g: *const forms.Group, first: usize) [4][3]i32 {
+    var cols: [4][3]i32 = @splat(@splat(0));
+    var c0: i32 = 0;
+    var ci = first;
+    for (g.rows) |row| {
+        for (0..row.len) |k| {
+            if (ci >= app.n_cells) break;
+            const lw = labelCol(&app.cells[ci], k, g);
+            if (k == 0) c0 = @max(c0, lw) else cols[row.len][k] = @max(cols[row.len][k], lw);
+            ci += 1;
+        }
+    }
+    for (&cols) |*c| c[0] = c0;
+    return cols;
+}
+
+/// Przyciski za polem (odnośnik, „Przypnij…”) — stała część szerokości komórki.
+fn cellExtra(cc: *const CellCtl) i32 {
+    var e: i32 = 0;
+    if (cc.btn != null) e += cc.btn_w + px(4);
+    if (cc.pin != null) e += cc.pin_w + px(4);
+    return e;
+}
+
+/// Deterministyczny układ zakładki formularza w `area` (współrzędne kontenera
+/// zakładki). Każdy prostokąt wynika wyłącznie z szerokości obszaru i zmierzonych
+/// tekstów; przy `apply = false` tylko liczy (minimalna szerokość, wysokość).
+/// W wierszu: etykiety (kolumny), przyciski i znaczniki mają stałą szerokość,
+/// pola wartości dzielą resztę po równo, a ostatnie dochodzi do prawej krawędzi.
+fn layoutForm(t: usize, area: w.RECT, apply: bool) Fit {
+    var fit: Fit = .{};
     var y = area.top;
     const x0 = area.left;
     const full_width = area.right - area.left;
     if (forms.tabs[t].selector != null) {
-        // Etykieta nieco szersza niż polska — tłumaczenia bywają dłuższe.
-        move(app.sel_label[t], x0 + px(4), y + px(4), px(90), px(20));
-        move(app.sel_combo[t], x0 + px(98), y, @max(px(200), full_width - px(98)), px(300));
+        const lw = @max(px(90), app.sel_w[t] + px(4));
+        fit.min_w = lw + px(8) + px(M.sel_combo_min);
+        if (apply) {
+            move(app.sel_label[t], x0 + px(4), y + px(4), lw, px(20));
+            move(app.sel_combo[t], x0 + px(8) + lw, y, @max(px(M.sel_combo_min), full_width - px(8) - lw), px(300));
+        }
         y += px(M.sel_h) + px(4);
     }
     // Komórki i ramki są tworzone w tej samej kolejności co tu iterujemy.
@@ -544,7 +672,7 @@ fn layoutForm(t: usize, area: w.RECT) void {
     // Mapa gniazd pamięci: pas na całą szerokość przed grupami.
     if (forms.tabs[t].slot_map) {
         const mh = slotMapHeight();
-        move(app.slot_map, x0, y, full_width, mh);
+        if (apply) move(app.slot_map, x0, y, full_width, mh);
         y += mh + px(M.gap);
     }
     // Kolumna plakietek po prawej, od góry pierwszego pasa grup. Każdy pas,
@@ -555,51 +683,83 @@ fn layoutForm(t: usize, area: w.RECT) void {
         for (&badges) |*bv| {
             if (bv.hwnd == null or bv.tab != t) continue;
             const bh = badgeHeight(bv.kind);
-            move(bv.hwnd, x0 + full_width - px(badge_w), by, px(badge_w), bh);
+            if (apply) move(bv.hwnd, x0 + full_width - px(badge_w), by, px(badge_w), bh);
             badge_bottom = by + bh;
             by += bh + px(4);
         }
     }
+    const mw: i32 = if (app.show_sources) px(M.mark_w) else 0;
     for (forms.tabs[t].bands) |band| {
-        const width = if (y < badge_bottom) full_width - px(badge_w) - px(M.gap) else full_width;
+        const side: i32 = if (y < badge_bottom) px(badge_w) + px(M.gap) else 0;
+        const width = full_width - side;
         var total_w: i32 = 0;
         for (band) |g| total_w += g.weight;
         var band_h: i32 = 0;
         for (band) |*g| band_h = @max(band_h, groupHeight(g));
+        var band_min: i32 = 0;
         var gx = x0;
         for (band, 0..) |*g, k| {
-            const gw = if (k == band.len - 1) x0 + width - gx else @divTrunc(width * g.weight, total_w) - @divTrunc(px(M.gap), 2);
-            move(app.groups[gi].hwnd, gx, y, gw, band_h);
+            const weight: i32 = g.weight;
+            const gw = if (k == band.len - 1) x0 + width - gx else @divTrunc(width * weight, total_w) - @divTrunc(px(M.gap), 2);
+            const cols = groupColumns(g, ci);
+            var g_min: i32 = (if (gi < app.n_groups) app.groups[gi].title_w else 0) + px(24);
+            if (apply and gi < app.n_groups) move(app.groups[gi].hwnd, gx, y, gw, band_h);
             gi += 1;
             var ry = y + px(M.head);
             const inner_x = gx + px(M.pad);
             const inner_w = gw - 2 * px(M.pad);
             for (g.rows) |row| {
-                const n: i32 = @intCast(row.len);
-                const cw = @divTrunc(inner_w - (n - 1) * px(M.cell_gap), n);
+                const n = row.len;
+                const ni: i32 = @intCast(n);
+                // Stała część wiersza: etykiety, znaczniki, przyciski, odstępy.
+                var fixed: i32 = (ni - 1) * px(M.cell_gap);
+                var fixed_min: i32 = fixed;
+                for (0..n) |k2| {
+                    if (ci + k2 >= app.n_cells) break;
+                    const e = cols[n][k2] + cellExtra(&app.cells[ci + k2]);
+                    fixed += e + mw;
+                    // Minimum liczone ze znacznikiem: „Pokaż źródła” nie może nic zepsuć.
+                    fixed_min += e + px(M.mark_w);
+                }
+                g_min = @max(g_min, 2 * px(M.pad) + fixed_min + ni * px(M.min_edit));
+                const each = @max(px(M.min_edit), @divTrunc(inner_w - fixed, ni));
+                var cx = inner_x;
                 for (row, 0..) |c, k2| {
+                    if (ci >= app.n_cells) break;
                     const cc = &app.cells[ci];
                     ci += 1;
-                    const cx = inner_x + @as(i32, @intCast(k2)) * (cw + px(M.cell_gap));
-                    const lw = px(if (c.label_w > 0) c.label_w else if (k2 == 0) g.label_w else 56);
-                    const mw: i32 = if (app.show_sources) px(M.mark_w) else 0;
-                    const pin_w = px(if (c.pin_model) M.pin_model_w else M.pin_w);
-                    const pw: i32 = if (cc.pin != null) pin_w + px(4) else 0;
-                    const bw: i32 = (if (cc.btn != null) px(M.btn_w) + px(4) else 0) + pw;
+                    const lw = cols[n][k2];
+                    const extra_w = cellExtra(cc);
+                    const ew = if (k2 == n - 1) @max(px(M.min_edit), inner_x + inner_w - cx - lw - mw - extra_w) else each;
                     const eh = px(M.edit_h) + px(M.line_h) * (@as(i32, c.lines) - 1);
-                    move(cc.lbl, cx, ry + px(3), lw - px(4), px(18));
-                    move(cc.edit, cx + lw, ry, @max(px(20), cw - lw - mw - bw), eh);
-                    move(cc.mark, cx + cw - mw - bw + px(3), ry + px(3), mw, px(18));
-                    show(cc.mark, app.show_sources and t == app.current and !app.list_mode);
-                    if (cc.btn) |b| move(b, cx + cw - bw + px(4), ry - px(1), px(M.btn_w), px(M.edit_h) + px(2));
-                    if (cc.pin) |b| move(b, cx + cw - pw + px(4), ry - px(1), pin_w, px(M.edit_h) + px(2));
+                    const ex = cx + lw + ew;
+                    if (apply) {
+                        move(cc.lbl, cx, ry + px(3), lw - px(4), px(18));
+                        move(cc.edit, cx + lw, ry, ew, eh);
+                        move(cc.mark, ex + px(2), ry + px(3), @max(mw - px(2), 0), px(18));
+                    }
+                    var bx = ex + mw;
+                    if (cc.btn) |b| {
+                        if (apply) move(b, bx + px(4), ry - px(1), cc.btn_w, px(M.edit_h) + px(2));
+                        bx += cc.btn_w + px(4);
+                    }
+                    if (cc.pin) |b| {
+                        if (apply) move(b, bx + px(4), ry - px(1), cc.pin_w, px(M.edit_h) + px(2));
+                        bx += cc.pin_w + px(4);
+                    }
+                    cx = bx + px(M.cell_gap);
                 }
                 ry += rowHeight(row);
             }
+            // Ramki dostają `width * waga / suma wag` — pas musi zmieścić każdą.
+            band_min = @max(band_min, @divTrunc((g_min + px(M.gap)) * total_w + weight - 1, weight));
             gx += gw + px(M.gap);
         }
+        fit.min_w = @max(fit.min_w, band_min + side);
         y += band_h + px(M.gap);
     }
+    fit.bottom = y;
+    return fit;
 }
 
 /// Wysokość tekstu kontrolki STATIC przy danej szerokości (DT_CALCRECT,
@@ -619,11 +779,41 @@ fn textHeight(hh: w.HWND, width: i32) i32 {
     return r.bottom - r.top + px(4);
 }
 
+const SIZE = extern struct { cx: i32 = 0, cy: i32 = 0 };
 extern "user32" fn GetWindowTextW(w.HWND, [*]u16, i32) callconv(.winapi) i32;
 extern "user32" fn GetDC(?w.HWND) callconv(.winapi) ?*anyopaque;
 extern "user32" fn ReleaseDC(?w.HWND, ?*anyopaque) callconv(.winapi) i32;
+extern "gdi32" fn GetTextExtentPoint32W(?*anyopaque, [*]const u16, i32, *SIZE) callconv(.winapi) w.BOOL;
+extern "user32" fn GetSystemMetricsForDpi(i32, u32) callconv(.winapi) i32;
+extern "user32" fn AdjustWindowRectExForDpi(*w.RECT, u32, w.BOOL, u32, u32) callconv(.winapi) w.BOOL;
 
-fn layoutSpecial(t: usize, area: w.RECT) void {
+/// Szerokość tekstu kontrolki w czcionce okna (GetTextExtentPoint32).
+fn textWidthOf(h: ?w.HWND) i32 {
+    const hh = h orelse return 0;
+    var wb: [1024]u16 = undefined;
+    const n = GetWindowTextW(hh, &wb, wb.len);
+    if (n <= 0) return 0;
+    const hdc = GetDC(hh);
+    defer _ = ReleaseDC(hh, hdc);
+    const old = SelectObject(hdc, app.font);
+    defer _ = SelectObject(hdc, old);
+    var sz: SIZE = .{};
+    _ = GetTextExtentPoint32W(hdc, &wb, n, &sz);
+    return sz.cx;
+}
+
+/// Pole wyboru: kwadrat (SM_CXMENUCHECK) + odstęp + tekst + zapas.
+fn checkW(h: ?w.HWND) i32 {
+    return textWidthOf(h) + GetSystemMetricsForDpi(71, app.dpi) + px(12);
+}
+
+/// Przycisk: tekst + marginesy motywu, nie mniej niż `min` (px przy 96 DPI).
+fn buttonW(h: ?w.HWND, min: i32) i32 {
+    return @max(px(min), textWidthOf(h) + px(24));
+}
+
+fn layoutSpecial(t: usize, area: w.RECT, apply: bool) Fit {
+    var fit: Fit = .{ .min_w = px(240) };
     var y = area.top;
     const x = area.left;
     const width = area.right - area.left;
@@ -643,7 +833,7 @@ fn layoutSpecial(t: usize, area: w.RECT) void {
             if (row_open) y += px(30);
             row_open = false;
             if (group) |g| {
-                move(g, x, group_top, width, y + px(6) - group_top);
+                if (apply) move(g, x, group_top, width, y + px(6) - group_top);
                 y += px(6) + px(M.gap);
             }
             group = hh;
@@ -651,27 +841,149 @@ fn layoutSpecial(t: usize, area: w.RECT) void {
             y += px(M.head) + px(2);
             bx = inner_x;
         } else if (is_button) {
-            // Pole wyboru i dłuższe przyciski (aktualizacje) potrzebują więcej miejsca.
-            const style: u32 = @bitCast(GetWindowLongW(hh, -16));
-            const bw: i32 = if ((style & 0xF) == w.BS_AUTOCHECKBOX) px(230) else if (GetWindowLongW(hh, -12) == update.gui.ID_CHECK) px(170) else px(130);
+            // Szerokość z tekstu (measure): dłuższe tłumaczenia nie są ucinane.
+            const bw = e.want_w;
+            fit.min_w = @max(fit.min_w, bw + 2 * px(M.pad));
             if (row_open and bx + bw > inner_x + inner_w) {
                 y += px(30);
                 bx = inner_x;
             }
-            move(hh, bx, y, bw, px(26));
+            if (apply) move(hh, bx, y, bw, px(26));
             bx += bw + px(6);
             row_open = true;
         } else {
             if (row_open) y += px(30);
             row_open = false;
             const th = textHeight(hh, inner_w);
-            move(hh, inner_x, y, inner_w, th);
+            if (apply) move(hh, inner_x, y, inner_w, th);
             y += th;
             bx = inner_x;
         }
     }
     if (row_open) y += px(30);
-    if (group) |g| move(g, x, group_top, width, y + px(6) - group_top);
+    if (group) |g| {
+        if (apply) move(g, x, group_top, width, y + px(6) - group_top);
+        y += px(6);
+    }
+    fit.bottom = y;
+    return fit;
+}
+
+/// Stałe części okna wokół obszaru treści zakładki (marginesy, ramka tab
+/// control, wiersz tytułu, pasek dolny) — px przy bieżącym DPI.
+fn chrome() struct { x: i32, y: i32 } {
+    var r: w.RECT = .{ .left = 0, .top = 0, .right = 1000, .bottom = 1000 };
+    if (app.tab) |tab| _ = w.SendMessageW(tab, w.TCM_ADJUSTRECT, 0, lp(&r));
+    const ix = 1000 - (r.right - r.left);
+    const iy = 1000 - (r.bottom - r.top);
+    const m = px(6);
+    return .{ .x = 2 * m + ix + 2 * px(8), .y = 3 * m + px(26) + iy + px(6) + px(26) + px(8) };
+}
+
+/// Mierzy teksty kontrolek w bieżącej czcionce i języku i wylicza minimalny
+/// obszar klienta okna, przy którym na ŻADNEJ zakładce nic się nie nakłada
+/// ani nie ucina. Wołane po zmianie czcionki (start, zmiana DPI).
+fn measure() void {
+    for (app.cells[0..app.n_cells]) |*c| {
+        c.lbl_w = textWidthOf(c.lbl);
+        c.btn_w = if (c.btn != null) buttonW(c.btn, M.btn_w) else 0;
+        c.pin_w = if (c.pin != null) buttonW(c.pin, if (c.cell.pin_model) M.pin_model_w else M.pin_w) else 0;
+    }
+    for (app.groups[0..app.n_groups]) |*g| g.title_w = textWidthOf(g.hwnd);
+    for (app.sel_label, 0..) |h, i| app.sel_w[i] = textWidthOf(h);
+    for (app.extras[0..app.n_extras]) |*e| {
+        e.want_w = 0;
+        const hh = e.hwnd orelse continue;
+        if (isGroupBox(hh) or !isButton(hh)) continue;
+        const style: u32 = @bitCast(GetWindowLongW(hh, -16));
+        e.want_w = if ((style & 0xF) == w.BS_AUTOCHECKBOX)
+            @max(px(230), checkW(hh))
+        else if (GetWindowLongW(hh, -12) == update.gui.ID_CHECK)
+            buttonW(hh, 170)
+        else
+            buttonW(hh, 130);
+    }
+    app.bar_w = .{ buttonW(app.btn_refresh, 110), checkW(app.chk_sources), checkW(app.chk_serials), checkW(app.chk_list) };
+    app.lang_w = textWidthOf(app.lang_label) + px(8);
+
+    const ch = chrome();
+    // Szerokość: maksimum po zakładkach, wiersz tytułu „O programie”, pasek dolny.
+    var content_w: i32 = px(320);
+    const probe: w.RECT = .{ .left = 0, .top = 0, .right = px(1000), .bottom = px(4000) };
+    for (forms.tabs, 0..) |tb, t| {
+        const fit: Fit = switch (tb.kind) {
+            .form => layoutForm(t, probe, false),
+            .bench, .about => layoutSpecial(t, probe, false),
+            .sensors => .{},
+        };
+        content_w = @max(content_w, fit.min_w);
+    }
+    content_w = @max(content_w, px(60) + px(12) + app.lang_w + px(170));
+    var bar: i32 = 2 * px(6) + 3 * px(10);
+    for (app.bar_w) |b| bar += b;
+    const min_w = @max(content_w + ch.x, bar);
+    // Wysokość przy tej szerokości (tekst zakładek specjalnych się zawija).
+    const at_min: w.RECT = .{ .left = 0, .top = 0, .right = min_w - ch.x, .bottom = px(4000) };
+    var content_h: i32 = px(300);
+    for (forms.tabs, 0..) |tb, t| {
+        const fit: Fit = switch (tb.kind) {
+            .form => layoutForm(t, at_min, false),
+            .bench, .about => layoutSpecial(t, at_min, false),
+            .sensors => .{},
+        };
+        content_h = @max(content_h, fit.bottom);
+    }
+    app.min_client_w = min_w;
+    app.min_client_h = content_h + ch.y;
+}
+
+/// Minimalny rozmiar okna (z ramką) dla `measure()`; przed pomiarem — stały.
+fn minWindowSize() w.POINT {
+    if (app.min_client_w <= 0) return .{ .x = px(600), .y = px(560) };
+    var r: w.RECT = .{ .left = 0, .top = 0, .right = app.min_client_w, .bottom = app.min_client_h };
+    _ = AdjustWindowRectExForDpi(&r, w.WS_OVERLAPPEDWINDOW, 0, 0, app.dpi);
+    return .{ .x = r.right - r.left, .y = r.bottom - r.top };
+}
+
+// --- Ramki grup ------------------------------------------------------------
+//
+// Ramka (BS_GROUPBOX) leży POD swoimi polami (HWND_BOTTOM) i ma WS_CLIPSIBLINGS,
+// więc maluje tylko odsłonięte miejsca między polami i nigdy nie zamalowuje
+// etykiet. Panel ma WS_CLIPCHILDREN, czyli nie czyści tła pod ramką — a sama
+// kontrolka BUTTON wnętrza nie czyści. Po zmianie szerokości zostawały tam
+// stare piksele („Pamięć podręcznaaaa…”, połówki przycisków, pionowe kreski),
+// a ramka nad polami zamalowywała etykiety („epping”, puste pola Topologii).
+// Dlatego ramka czyści swoje wnętrze pędzlem panelu (WM_ERASEBKGND).
+
+var groupbox_proc: isize = 0;
+extern "user32" fn SetWindowLongPtrW(w.HWND, i32, isize) callconv(.winapi) isize;
+extern "user32" fn CallWindowProcW(isize, w.HWND, u32, w.WPARAM, w.LPARAM) callconv(.winapi) w.LRESULT;
+
+fn groupBoxProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.winapi) w.LRESULT {
+    const WM_ERASEBKGND: u32 = 0x0014;
+    if (msg == WM_ERASEBKGND) {
+        var rc: w.RECT = undefined;
+        _ = w.GetClientRect(hwnd, &rc);
+        _ = FillRect(@ptrFromInt(wp), &rc, w.GetSysColorBrush(w.COLOR_WINDOW));
+        return 1;
+    }
+    return CallWindowProcW(groupbox_proc, hwnd, msg, wp, lparam);
+}
+
+fn prepareGroupBox(h: ?w.HWND) void {
+    const hh = h orelse return;
+    const old = SetWindowLongPtrW(hh, -4, @bitCast(@intFromPtr(&groupBoxProc))); // GWLP_WNDPROC
+    if (groupbox_proc == 0) groupbox_proc = old;
+    _ = w.SetWindowPos(hh, @ptrFromInt(1), 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE); // HWND_BOTTOM
+}
+
+fn prepareGroupBoxes() void {
+    for (app.groups[0..app.n_groups]) |g| prepareGroupBox(g.hwnd);
+    for (app.extras[0..app.n_extras]) |e| {
+        if (e.hwnd) |hh| {
+            if (isGroupBox(hh)) prepareGroupBox(hh);
+        }
+    }
 }
 
 extern "user32" fn GetWindowLongW(w.HWND, i32) callconv(.winapi) i32;
@@ -721,12 +1033,9 @@ fn fillForm(t: usize) void {
     for (app.cells[0..app.n_cells]) |*c| {
         if (c.tab != t) continue;
         if (fieldOfCell(c)) |f| {
-            const v = report.shownValue(f.*, exportOpts(), &vb);
-            // Brak wartości pokazujemy razem z powodem — „—” samo nic nie mówi.
-            if (std.mem.eql(u8, v, "—") and f.state != .ok) {
-                var sb: [160]u8 = undefined;
-                setText(c.edit, std.fmt.bufPrint(&sb, "— ({s})", .{f.state.label()}) catch v);
-            } else setText(c.edit, v);
+            // Maskowanie numerów seryjnych wg bieżącego stanu „Pokaż numery
+            // seryjne” i brak wartości z powodem (wspólne z testami: forms.zig).
+            setText(c.edit, forms.displayValue(f.*, app.show_serials, &vb));
             setText(c.mark, markText(f.*));
             c.tone = valueTone(f.*);
             c.mark_tone = markTone(f.*);
@@ -783,7 +1092,7 @@ fn applyColumnWidths() void {
 }
 
 fn statusText(f: report.Field, buf: []u8) []const u8 {
-    if (f.state == .ok) return std.fmt.bufPrint(buf, "{s}", .{f.confidence.toSlice()}) catch "";
+    if (f.state == .ok) return std.fmt.bufPrint(buf, "{s}", .{report.confidenceLabel(f.confidence)}) catch "";
     return std.fmt.bufPrint(buf, "{s}", .{f.state.label()}) catch "";
 }
 
@@ -1070,9 +1379,13 @@ fn layout() void {
     const tab = app.tab orelse return;
     var rc: w.RECT = undefined;
     _ = w.GetClientRect(hwnd, &rc);
+    if (rc.right <= 0 or rc.bottom <= 0) return; // zminimalizowane
+    // Jeden przebieg: wszystkie prostokąty z szerokości klienta, przesunięcie
+    // partiami (DeferWindowPos), potem przemalowanie całości z czyszczeniem tła.
+    beginMoves();
     const m = px(6);
     const bar_h = px(26);
-    _ = w.MoveWindow(tab, m, m, rc.right - 2 * m, rc.bottom - 3 * m - bar_h, 1);
+    move(tab, m, m, rc.right - 2 * m, rc.bottom - 3 * m - bar_h);
     var r: w.RECT = .{ .left = m, .top = m, .right = rc.right - m, .bottom = rc.bottom - 2 * m - bar_h };
     _ = w.SendMessageW(tab, w.TCM_ADJUSTRECT, 0, lp(&r));
     move(app.panel, r.left, r.top, r.right - r.left, r.bottom - r.top);
@@ -1084,7 +1397,7 @@ fn layout() void {
         // Wybór języka w prawym górnym rogu zakładki „O programie” (wiersz tytułu
         // jest tu krótki, a ramki poniżej wypełniają już całą wysokość).
         const combo_w = px(170);
-        const label_w = px(110);
+        const label_w = app.lang_w;
         const right = pw - pad;
         move(app.lang_combo, right - combo_w, px(4), combo_w, px(300));
         move(app.lang_label, right - combo_w - px(6) - label_w, px(8), label_w, px(20));
@@ -1098,18 +1411,22 @@ fn layout() void {
     const local: w.RECT = .{ .left = 0, .top = 0, .right = area.right - area.left, .bottom = area.bottom - area.top };
     const t = app.current;
     switch (forms.tabs[t].kind) {
-        .form => layoutForm(t, local),
-        .bench, .about => layoutSpecial(t, local),
+        .form => _ = layoutForm(t, local, true),
+        .bench, .about => _ = layoutSpecial(t, local, true),
         .sensors => {},
     }
-    // Pasek dolny.
+    // Pasek dolny: szerokości ze zmierzonych tekstów (measure), jeden za drugim.
     const by = rc.bottom - m - bar_h;
-    // Szerokości z zapasem na dłuższe tłumaczenia (np. niemieckie).
-    move(app.btn_refresh, m, by, px(110), bar_h);
-    move(app.chk_sources, m + px(120), by, px(130), bar_h);
-    move(app.chk_serials, m + px(254), by, px(184), bar_h);
-    move(app.chk_list, m + px(442), by, px(180), bar_h);
+    var bx = m;
+    for ([_]?w.HWND{ app.btn_refresh, app.chk_sources, app.chk_serials, app.chk_list }, app.bar_w) |h, bw| {
+        move(h, bx, by, bw, bar_h);
+        bx += bw + px(10);
+    }
+    endMoves();
     applyColumnWidths();
+    // RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME — całe okno
+    // (panel, kontenery zakładek, ramki, pasek dolny) maluje się od nowa.
+    _ = RedrawWindow(hwnd, null, null, 0x0001 | 0x0004 | 0x0080 | 0x0400);
 }
 
 fn cellByHwnd(h: usize) ?*const CellCtl {
@@ -1124,7 +1441,7 @@ fn cellByHwnd(h: usize) ?*const CellCtl {
 fn wndProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.winapi) w.LRESULT {
     switch (msg) {
         w.WM_SIZE => {
-            layout();
+            if (wp != 1) layout(); // SIZE_MINIMIZED: nic do układania
             return 0;
         },
         w.WM_NOTIFY => {
@@ -1239,7 +1556,9 @@ fn wndProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.win
         },
         w.WM_GETMINMAXINFO => {
             const mmi: *w.MINMAXINFO = @ptrFromInt(@as(usize, @bitCast(lparam)));
-            mmi.ptMinTrackSize = .{ .x = px(600), .y = px(560) };
+            // Minimum z pomiaru tekstów (measure): mniejsze okno nakładałoby
+            // albo ucinało kontrolki.
+            mmi.ptMinTrackSize = minWindowSize();
             return 0;
         },
         w.WM_DPICHANGED => {
@@ -1250,6 +1569,7 @@ fn wndProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lparam: w.LPARAM) callconv(.win
             app.font_title = makeTitleFont(app.dpi);
             applyFonts();
             applyRowHeight();
+            measure();
             if (old) |f| _ = w.DeleteObject(f);
             if (old_title) |f| _ = w.DeleteObject(f);
             const r: *const w.RECT = @ptrFromInt(@as(usize, @bitCast(lparam)));
@@ -1400,7 +1720,7 @@ pub fn wWinMain(inst: w.HINSTANCE, _: ?w.HINSTANCE, cmd_ptr: [*:0]u16, show_cmd:
         tp.* = w.CreateWindowExW(0, panel_class, null, w.WS_CHILD | w.WS_CLIPCHILDREN | w.WS_CLIPSIBLINGS, 0, 0, 10, 10, app.panel, null, inst, null);
     }
     create_parent = app.panel;
-    app.ttl = createChild(L("STATIC"), null, 0, w.WS_CHILD | w.WS_VISIBLE | w.SS_LEFT | w.SS_NOPREFIX | w.SS_ENDELLIPSIS, 0);
+    app.ttl = createChild(L("STATIC"), null, 0, w.WS_CHILD | w.WS_VISIBLE | w.SS_LEFT | w.SS_NOPREFIX | w.SS_ENDELLIPSIS, ID_TITLE);
     app.lv = createChild(L("SysListView32"), null, 0, w.WS_CHILD | w.WS_TABSTOP | w.LVS_REPORT | w.LVS_SINGLESEL | w.LVS_SHOWSELALWAYS | w.LVS_NOSORTHEADER | w.LVS_SHAREIMAGELISTS, 0);
     if (app.tab == null or app.lv == null) return 1;
     const ex = w.LVS_EX_FULLROWSELECT | w.LVS_EX_DOUBLEBUFFER | w.LVS_EX_LABELTIP;
@@ -1431,6 +1751,8 @@ pub fn wWinMain(inst: w.HINSTANCE, _: ?w.HINSTANCE, cmd_ptr: [*:0]u16, show_cmd:
         var ti: w.TCITEMW = .{ .mask = w.TCIF_TEXT, .pszText = widen(&wb, i18n.t(t.title)) };
         _ = w.SendMessageW(app.tab.?, w.TCM_INSERTITEMW, i, lp(&ti));
     }
+    prepareGroupBoxes();
+    measure();
 
     app.list_mode = loadListMode();
     if (std.mem.indexOf(u16, cmd, L("--list")) != null) app.list_mode = true;
@@ -1442,7 +1764,8 @@ pub fn wWinMain(inst: w.HINSTANCE, _: ?w.HINSTANCE, cmd_ptr: [*:0]u16, show_cmd:
 
     const start = argTab(cmd) orelse 0;
     _ = w.SendMessageW(app.tab.?, w.TCM_SETCURSEL, start, 0);
-    _ = w.SetWindowPos(hwnd, null, 0, 0, px(660), px(640), w.SWP_NOMOVE | w.SWP_NOZORDER | w.SWP_NOACTIVATE);
+    const min_size = minWindowSize();
+    _ = w.SetWindowPos(hwnd, null, 0, 0, @max(px(660), min_size.x), @max(px(640), min_size.y), w.SWP_NOMOVE | w.SWP_NOZORDER | w.SWP_NOACTIVATE);
     showTab(start);
     _ = w.SetTimer(hwnd, timer_id, refresh_ms, null);
     _ = w.ShowWindow(hwnd, show_cmd);

@@ -865,5 +865,12 @@
   "Kanał {channel}": "Kanalas {channel}",
   "Tryb kanałów": "Kanalų režimas",
   "tabela kuratorowana (db/source/gpu_boards.toml), dopasowanie po podsystemie i numerze części VBIOS": "kuruojama lentelė (db/source/gpu_boards.toml), atitiktis pagal posistemę ir VBIOS dalies numerį",
-  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "tą pačią PCI posistemę gali turėti ir kitos plokštės versijos — VBIOS dalies numeris nebuvo pasiekiamas"
+  "ten sam podsystem PCI mogą mieć inne wersje karty — numer części VBIOS nie był dostępny": "tą pačią PCI posistemę gali turėti ir kitos plokštės versijos — VBIOS dalies numeris nebuvo pasiekiamas",
+  "Łącznie": "Iš viso",
+  "{size}, {ways}-way": "{size}, {ways} krypčių",
+  "suma wszystkich poziomów cache (rozmiar instancji × liczba instancji)": "visų podėlio lygių suma (egzemplioriaus dydis × egzempliorių skaičius)",
+  "pewność\u0004wysoka": "aukštas",
+  "pewność\u0004średnia": "vidutinis",
+  "pewność\u0004niska": "žemas",
+  "pewność\u0004nieznana": "nežinomas"
 }

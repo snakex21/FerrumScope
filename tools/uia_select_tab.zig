@@ -12,6 +12,10 @@
 //! Użycie: uia-select-tab <hwnd dziesiętnie> <nazwa zakładki | #indeks>
 //! `#3` wybiera czwartą zakładkę (indeks od 0) niezależnie od języka
 //! interfejsu — do zrzutów ekranu w dowolnym języku.
+//!
+//! `uia-select-tab <hwnd> toggle:<AutomationId>` przełącza pole wyboru
+//! (`TogglePattern.Toggle()`); AutomationId kontrolki Win32 = jej ID (np. `104`
+//! dla „Pokaż numery seryjne”). Też bez klikania i bez klawiszy.
 //! Kod wyjścia: 0 = wybrano, 1 = błąd UIA, 2 = brak zakładki, 3 = złe argumenty.
 
 const std = @import("std");
@@ -36,11 +40,14 @@ extern "oleaut32" fn SysFreeString(?[*]const u16) callconv(.winapi) void;
 
 const CLSID_CUIAutomation = GUID{ .d1 = 0xff48dba4, .d2 = 0x60ef, .d3 = 0x4201, .d4 = .{ 0xaa, 0x87, 0x54, 0x10, 0x3e, 0xef, 0x59, 0x4e } };
 const IID_IUIAutomation = GUID{ .d1 = 0x30cbe57d, .d2 = 0xd9d0, .d3 = 0x452a, .d4 = .{ 0xab, 0x13, 0x7a, 0xc5, 0xac, 0x48, 0x25, 0xee } };
+const IID_Toggle = GUID{ .d1 = 0x94cf8058, .d2 = 0x9b8d, .d3 = 0x4ab9, .d4 = .{ 0x8b, 0xfd, 0x4c, 0xd0, 0xa3, 0x3c, 0x8c, 0x70 } };
 const IID_SelectionItem = GUID{ .d1 = 0xa8efa66a, .d2 = 0x0fda, .d3 = 0x421a, .d4 = .{ 0x91, 0x94, 0x38, 0x02, 0x1f, 0x35, 0x78, 0xea } };
 
 const UIA_ControlTypePropertyId: i32 = 30003;
 const UIA_TabItemControlTypeId: i32 = 50019;
 const UIA_SelectionItemPatternId: i32 = 10010;
+const UIA_CheckBoxControlTypeId: i32 = 50002;
+const UIA_TogglePatternId: i32 = 10015;
 const TreeScope_Descendants: i32 = 4;
 const VT_I4: u16 = 3;
 
@@ -59,11 +66,13 @@ pub fn main() !u8 {
     if (args.len < 3) return 3;
     const hwnd_val = std.fmt.parseInt(usize, args[1], 10) catch return 3;
     // `#n` = zakładka o indeksie n (kolejność UIA = kolejność zakładek).
-    const want_index: ?i32 = if (args[2].len > 1 and args[2][0] == '#')
+    const toggle_prefix = "toggle:";
+    const toggle = std.mem.startsWith(u8, args[2], toggle_prefix);
+    const want_index: ?i32 = if (!toggle and args[2].len > 1 and args[2][0] == '#')
         (std.fmt.parseInt(i32, args[2][1..], 10) catch return 3)
     else
         null;
-    const want = try std.unicode.utf8ToUtf16LeAlloc(arena.allocator(), args[2]);
+    const want = try std.unicode.utf8ToUtf16LeAlloc(arena.allocator(), if (toggle) args[2][toggle_prefix.len..] else args[2]);
 
     _ = CoInitializeEx(null, 2);
     var uia_ptr: ?*anyopaque = null;
@@ -79,7 +88,7 @@ pub fn main() !u8 {
 
     var cond_ptr: ?*anyopaque = null;
     const createCond = method(uia, *const fn (*ComObj, i32, VARIANT, *?*anyopaque) callconv(.winapi) HRESULT, 23);
-    if (createCond(uia, UIA_ControlTypePropertyId, .{ .vt = VT_I4, .val = UIA_TabItemControlTypeId }, &cond_ptr) < 0) return 1;
+    if (createCond(uia, UIA_ControlTypePropertyId, .{ .vt = VT_I4, .val = if (toggle) UIA_CheckBoxControlTypeId else UIA_TabItemControlTypeId }, &cond_ptr) < 0) return 1;
     const cond: *ComObj = @ptrCast(@alignCast(cond_ptr.?));
     defer release(cond);
 
@@ -100,21 +109,24 @@ pub fn main() !u8 {
         if (want_index) |wi| {
             if (i != wi) continue;
         } else {
+            // 23 = get_CurrentName, 29 = get_CurrentAutomationId.
             var name: ?[*]const u16 = null;
-            if (method(el, *const fn (*ComObj, *?[*]const u16) callconv(.winapi) HRESULT, 23)(el, &name) < 0) continue;
+            if (method(el, *const fn (*ComObj, *?[*]const u16) callconv(.winapi) HRESULT, if (toggle) 29 else 23)(el, &name) < 0) continue;
             defer SysFreeString(name);
             const n = SysStringLen(name);
             if (name == null or !std.mem.eql(u16, name.?[0..n], want)) continue;
         }
 
         var pat_unk: ?*anyopaque = null;
-        if (method(el, *const fn (*ComObj, i32, *?*anyopaque) callconv(.winapi) HRESULT, 16)(el, UIA_SelectionItemPatternId, &pat_unk) < 0 or pat_unk == null) return 1;
+        const pattern_id = if (toggle) UIA_TogglePatternId else UIA_SelectionItemPatternId;
+        if (method(el, *const fn (*ComObj, i32, *?*anyopaque) callconv(.winapi) HRESULT, 16)(el, pattern_id, &pat_unk) < 0 or pat_unk == null) return 1;
         const unk: *ComObj = @ptrCast(@alignCast(pat_unk.?));
         defer release(unk);
         var pat_ptr: ?*anyopaque = null;
-        if (method(unk, *const fn (*ComObj, *const GUID, *?*anyopaque) callconv(.winapi) HRESULT, 0)(unk, &IID_SelectionItem, &pat_ptr) < 0) return 1;
+        if (method(unk, *const fn (*ComObj, *const GUID, *?*anyopaque) callconv(.winapi) HRESULT, 0)(unk, if (toggle) &IID_Toggle else &IID_SelectionItem, &pat_ptr) < 0) return 1;
         const pat: *ComObj = @ptrCast(@alignCast(pat_ptr.?));
         defer release(pat);
+        // Select() i Toggle() to w obu wzorcach metoda nr 3.
         return if (method(pat, *const fn (*ComObj) callconv(.winapi) HRESULT, 3)(pat) < 0) 1 else 0;
     }
     return 2;
